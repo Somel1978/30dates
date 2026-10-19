@@ -160,15 +160,20 @@ for key in JWT_SECRET ESCROW_PAIR_SALT CRON_SECRET; do
 done
 ```
 
-Set `WEB_ORIGIN` to the exact address you will type in the browser. For LAN testing that is the container's IP:
+Set `WEB_ORIGIN` to **every address you'll open the site with**, separated by commas. This starts you with the container's IP and its hostname:
 
 ```bash
-IP=$(hostname -I | awk '{print $1}'); echo "$IP"
-sed -i "s|CONTAINER_IP|$IP|" .env
+IP=$(hostname -I | awk '{print $1}')
+sed -i "s|^WEB_ORIGIN=.*|WEB_ORIGIN=http://$IP:3000,http://$(hostname):3000|" .env
 grep -E '^(NODE_ENV|WEB_ORIGIN|DATABASE_URL|UPLOAD_DIR)=' .env
+grep -c CHANGE_ME .env      # should print 0
 ```
 
-> `WEB_ORIGIN` must match the browser's address exactly, including `http`/`https` and the port. If it doesn't, sign-in requests are rejected as cross-origin.
+Check that `DATABASE_URL` has a long password after `thirtydates_app:`. If it shows `thirtydates_app:@`, the password variable was lost; see troubleshooting.
+
+> **What `WEB_ORIGIN` does.** It doesn't decide who can connect: the web app listens on every interface regardless. It's the list of addresses the site answers to. Sign-in and other form submissions are only accepted from these addresses (this stops other websites acting on a member's behalf). Each emailed sign-in link points back to the address the member used. Include the scheme and port, e.g. `http://30plus:3000`. Add more entries any time (a domain later on, say), then `sudo systemctl restart thirtydates-api`.
+
+The hostname entry only works if your router or local DNS resolves `30plus` (or whatever you named the container). Otherwise just use the IP.
 
 **Never change `ESCROW_PAIR_SALT` after members join.** It keys the hashed pair identifiers, so changing it orphans every pending stamp.
 
@@ -272,7 +277,7 @@ sudo systemctl daemon-reload
 
 ```
 NODE_ENV=production
-WEB_ORIGIN=https://YOUR.DOMAIN
+WEB_ORIGIN=https://YOUR.DOMAIN,http://<container-ip>:3000
 SMTP_URL=smtps://USER:PASSWORD@smtp.your-provider.com:465
 MAIL_FROM="Thirty Dates <hello@YOUR.DOMAIN>"
 ```
@@ -285,7 +290,7 @@ Any SMTP provider works (Postmark, Mailgun, Amazon SES, Fastmail, …). URL-enco
 sudo systemctl restart thirtydates-api thirtydates-worker thirtydates-web
 ```
 
-Open `https://YOUR.DOMAIN`. Sign-in links now arrive by email, and the session cookie is marked secure automatically because the origin is HTTPS.
+Open `https://YOUR.DOMAIN`. Sign-in links now arrive by email and point at whichever address you used. Sessions on the HTTPS address get a secure cookie automatically. Once step 3 has moved the web app behind Caddy, the `http://<container-ip>:3000` entry stops working, so you can drop it.
 
 ---
 
@@ -346,8 +351,9 @@ Jobs are safe to repeat; a job that isn't due yet answers `409 job_not_due`.
 | `Invalid configuration: …` in the API log | A value in `~/30dates/.env` is missing or too short. The message names it. |
 | Service fails with `Failed to load environment files` | The `.env` path in the unit doesn't match. Re-run the step 8 loop as your own user (not with `sudo -i`), so `$USER` and `$HOME` are yours. |
 | `EACCES` writing uploads | `~/30dates-data/uploads` is missing or not owned by you: `mkdir -p ~/30dates-data/uploads`. |
-| Sign-in link works but you land back on sign-in | `WEB_ORIGIN` doesn't match the browser address, or you opened the link in a different browser. |
-| `403 Cross-origin request rejected` | Same: fix `WEB_ORIGIN`, then `sudo systemctl restart thirtydates-api`. |
+| `403 Cross-origin request rejected` | The address in your browser bar isn't in the `WEB_ORIGIN` list. Add it exactly (scheme, host and port), then `sudo systemctl restart thirtydates-api`. |
+| Sign-in link works but you land back on sign-in | You opened the link in a different browser from the one that requested it, or on an address that isn't in `WEB_ORIGIN`. |
+| `DATABASE_URL` shows `thirtydates_app:@` (empty password) | Set a fresh one in both places: `P=$(openssl rand -hex 24); sed -i -E "s|thirtydates_app:[^@]*@|thirtydates_app:$P@|" ~/30dates/.env; sudo -u postgres psql -c "ALTER ROLE thirtydates_app PASSWORD '$P';"` |
 | `No existing cluster is suitable as a default target` / `You must install at least one postgresql-client-<version> package` | PostgreSQL never installed. Usually the Debian 12 commands were run on Debian 13: check `VERSION_CODENAME` and use the matching block in step 2. |
 | `type "vector" does not exist` | The pgvector package for your PostgreSQL version is missing: redo step 2 for your Debian release. |
 | `npm run build` killed / "JavaScript heap out of memory" | Give the container 4 GB RAM or add swap in Proxmox. |

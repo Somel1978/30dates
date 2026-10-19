@@ -16,9 +16,10 @@ export const emailSchema = z
 
 /**
  * Issues a single-use magic link. Always resolves the same way whether or not the address is
- * known, so the endpoint cannot be used to enumerate members.
+ * known, so the endpoint cannot be used to enumerate members. `siteOrigin` is the address the
+ * member requested it from (one of WEB_ORIGINS), so the link opens on that same address.
  */
-export async function requestMagicLink(ctx: AppContext, rawEmail: string): Promise<void> {
+export async function requestMagicLink(ctx: AppContext, rawEmail: string, siteOrigin: string): Promise<void> {
   const parsed = emailSchema.safeParse(rawEmail);
   if (!parsed.success) throw badRequest('invalid_email', 'Enter a valid email address');
   const email = parsed.data;
@@ -38,7 +39,7 @@ export async function requestMagicLink(ctx: AppContext, rawEmail: string): Promi
      VALUES ($1, $2, now() + make_interval(mins => $3))`,
     [email, sha256(token), MAGIC_LINK_TTL_MINUTES],
   );
-  const link = `${ctx.config.WEB_ORIGIN}/auth/verify?token=${encodeURIComponent(token)}`;
+  const link = `${siteOrigin}/auth/verify?token=${encodeURIComponent(token)}`;
   await ctx.mailer.send({ to: email, ...magicLinkEmail(link) });
 }
 

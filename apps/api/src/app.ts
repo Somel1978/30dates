@@ -28,7 +28,9 @@ declare module 'fastify' {
     authenticate: (req: FastifyRequest) => Promise<void>;
     requireOnboarded: (req: FastifyRequest) => Promise<void>;
     requireCron: (req: FastifyRequest) => Promise<void>;
-    startSession: (reply: FastifyReply, userId: string, tokenVersion: number) => Promise<void>;
+    startSession: (reply: FastifyReply, userId: string, tokenVersion: number, origin: string) => Promise<void>;
+    /** The request's Origin when it is one of WEB_ORIGINS, otherwise the first configured origin. */
+    siteOrigin: (req: FastifyRequest) => string;
   }
 }
 
@@ -58,19 +60,26 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
   await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0 } });
 
-  // CSRF defence for cookie auth: state-changing browser requests must come from the web origin.
+  const allowedOrigins = new Set(ctx.config.WEB_ORIGINS);
+
+  // CSRF defence for cookie auth: state-changing browser requests must come from one of the site's own addresses.
   app.addHook('onRequest', async (req) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return;
     const origin = req.headers.origin;
-    if (origin && origin !== ctx.config.WEB_ORIGIN) throw forbidden('bad_origin', 'Cross-origin request rejected');
+    if (origin && !allowedOrigins.has(origin)) throw forbidden('bad_origin', 'Cross-origin request rejected');
   });
 
-  app.decorate('startSession', async (reply: FastifyReply, userId: string, tokenVersion: number) => {
+  app.decorate('siteOrigin', (req: FastifyRequest) => {
+    const origin = req.headers.origin;
+    return origin && allowedOrigins.has(origin) ? origin : ctx.config.WEB_ORIGINS[0]!;
+  });
+
+  app.decorate('startSession', async (reply: FastifyReply, userId: string, tokenVersion: number, origin: string) => {
     const token = await reply.jwtSign({ sub: userId, tv: tokenVersion });
     reply.setCookie(SESSION_COOKIE, token, {
       httpOnly: true,
-      // Secure whenever the site is served over HTTPS; a plain-http LAN origin would never send it back.
-      secure: ctx.config.WEB_ORIGIN.startsWith('https://'),
+      // Secure when this address is HTTPS; a plain-http LAN address would never send it back.
+      secure: origin.startsWith('https://'),
       sameSite: 'lax',
       path: '/',
       maxAge: SESSION_TTL_SECONDS,

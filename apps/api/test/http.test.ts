@@ -133,6 +133,21 @@ describe('request hardening', () => {
     expect(codes).toEqual([202, 202, 202, 202, 202, 429]);
   });
 
+  it('accepts every configured address and links back to the one used', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/magic-link',
+      headers: { origin: 'http://lan.test:3000' },
+      payload: { email: 'lan@example.test' },
+      remoteAddress: '10.7.7.7',
+    });
+    expect(res.statusCode).toBe(202);
+    expect(ctx.sent.at(-1)!.text).toContain('http://lan.test:3000/auth/verify?token=');
+
+    await app.inject({ method: 'POST', url: '/api/auth/magic-link', payload: { email: 'cli@example.test' }, remoteAddress: '10.7.7.8' });
+    expect(ctx.sent.at(-1)!.text).toContain('http://web.test/auth/verify?token=');
+  });
+
   it('rejects cross-origin state changes', async () => {
     const res = await app.inject({
       method: 'POST',

@@ -31,7 +31,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
     async (req, reply) => {
       const { email } = parse(z.object({ email: z.string() }), req.body);
-      await requestMagicLink(ctx, email);
+      await requestMagicLink(ctx, email, app.siteOrigin(req));
       return reply.status(202).send({ sent: true });
     },
   );
@@ -42,7 +42,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const { token } = parse(z.object({ token: z.string() }), req.body);
       const session = await consumeMagicLink(ctx, token);
-      await app.startSession(reply, session.userId, session.tokenVersion);
+      await app.startSession(reply, session.userId, session.tokenVersion, app.siteOrigin(req));
       return { onboarded: session.onboarded };
     },
   );
