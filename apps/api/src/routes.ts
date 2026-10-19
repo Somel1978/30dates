@@ -1,7 +1,7 @@
 import { BRIDGE_MODES, MAX_ANSWER_BYTES, MAX_PROMPTS_PER_PICK } from '@thirtydates/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { SESSION_COOKIE, parse } from './app.js';
+import { parse } from './app.js';
 import { isJobName, runJob } from './jobs.js';
 import { badRequest, notFound } from './lib/errors.js';
 import { blockUser, deleteAccount } from './services/account.js';
@@ -49,7 +49,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/auth/logout', authed, async (req, reply) => {
     await revokeSessions(ctx, req.auth.userId);
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    app.endSession(reply);
     return reply.status(204).send();
   });
 
@@ -58,7 +58,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete('/me', authed, async (req, reply) => {
     await deleteAccount(ctx, req.auth.userId);
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    app.endSession(reply);
     return reply.status(204).send();
   });
 

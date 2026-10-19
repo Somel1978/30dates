@@ -26,19 +26,20 @@ const ORIGIN = { origin: 'http://web.test' };
 
 let clientSeq = 0;
 
-async function signIn(email: string): Promise<string> {
+async function signIn(email: string, origin = ORIGIN): Promise<string> {
   // Each simulated client gets its own address so the per-IP magic-link limit is not shared.
   clientSeq += 1;
   const remoteAddress = `10.0.${Math.floor(clientSeq / 250)}.${clientSeq % 250}`;
-  const res = await app.inject({ method: 'POST', url: '/api/auth/magic-link', headers: ORIGIN, payload: { email }, remoteAddress });
+  const res = await app.inject({ method: 'POST', url: '/api/auth/magic-link', headers: origin, payload: { email }, remoteAddress });
   expect(res.statusCode).toBe(202);
   const link = ctx.sent.at(-1)!.text.match(/https?:\/\/\S+/)![0];
   const token = new URL(link).searchParams.get('token')!;
-  const verify = await app.inject({ method: 'POST', url: '/api/auth/verify', headers: ORIGIN, payload: { token } });
+  const verify = await app.inject({ method: 'POST', url: '/api/auth/verify', headers: origin, payload: { token } });
   expect(verify.statusCode).toBe(200);
-  const cookie = verify.cookies.find((c) => c.name === 'td_session')!;
+  expect(verify.cookies).toHaveLength(1);
+  const cookie = verify.cookies[0]!;
   expect(cookie.httpOnly).toBe(true);
-  return `td_session=${cookie.value}`;
+  return `${cookie.name}=${cookie.value}`;
 }
 
 const onboardingPayload = {
@@ -112,6 +113,19 @@ describe('magic-link auth & onboarding', () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error).toBe('age_out_of_bounds');
+  });
+
+  it('keeps http and https sessions under separate cookies', async () => {
+    const plain = await signIn('both@example.test');
+    expect(plain.startsWith('td_sid=')).toBe(true);
+    const secure = await signIn('both@example.test', { origin: 'https://web.test' });
+    expect(secure.startsWith('__Host-td_sid=')).toBe(true);
+    // Over https the browser sends both; either alone also works.
+    for (const cookie of [plain, secure, `${plain}; ${secure}`]) {
+      const me = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
+      expect(me.statusCode).toBe(200);
+      expect(me.headers['cache-control']).toBe('no-store');
+    }
   });
 
   it('logout revokes the session', async () => {

@@ -9,7 +9,14 @@ import { HttpError, badRequest, forbidden, unauthorized } from './lib/errors.js'
 import { safeEqual } from './lib/crypto.js';
 import { registerRoutes } from './routes.js';
 
-export const SESSION_COOKIE = 'td_session';
+/**
+ * One session cookie per scheme. Cookies ignore the port, so http://host:3000 and https://host
+ * share one jar: a single name would let a Secure cookie set over HTTPS block every later
+ * sign-in over plain http (browsers refuse to overwrite it from an insecure page), and the
+ * magic link would be spent without signing anyone in. Separate names keep both working.
+ */
+export const SESSION_COOKIE = 'td_sid';
+export const SECURE_SESSION_COOKIE = '__Host-td_sid';
 const SESSION_TTL_SECONDS = 30 * 24 * 3600;
 
 declare module '@fastify/jwt' {
@@ -29,6 +36,7 @@ declare module 'fastify' {
     requireOnboarded: (req: FastifyRequest) => Promise<void>;
     requireCron: (req: FastifyRequest) => Promise<void>;
     startSession: (reply: FastifyReply, userId: string, tokenVersion: number, origin: string) => Promise<void>;
+    endSession: (reply: FastifyReply) => void;
     /** The request's Origin when it is one of WEB_ORIGINS, otherwise the first configured origin. */
     siteOrigin: (req: FastifyRequest) => string;
   }
@@ -54,7 +62,6 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   await app.register(cookie);
   await app.register(jwt, {
     secret: ctx.config.JWT_SECRET,
-    cookie: { cookieName: SESSION_COOKIE, signed: false },
     sign: { expiresIn: SESSION_TTL_SECONDS },
   });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
@@ -69,6 +76,11 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
     if (origin && !allowedOrigins.has(origin)) throw forbidden('bad_origin', 'Cross-origin request rejected');
   });
 
+  // API responses are per-member and change with the clock: never let a browser or proxy reuse one.
+  app.addHook('onSend', async (_req, reply) => {
+    if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
+  });
+
   app.decorate('siteOrigin', (req: FastifyRequest) => {
     const origin = req.headers.origin;
     return origin && allowedOrigins.has(origin) ? origin : ctx.config.WEB_ORIGINS[0]!;
@@ -76,10 +88,11 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
 
   app.decorate('startSession', async (reply: FastifyReply, userId: string, tokenVersion: number, origin: string) => {
     const token = await reply.jwtSign({ sub: userId, tv: tokenVersion });
-    reply.setCookie(SESSION_COOKIE, token, {
+    // Secure only when this address is HTTPS; a plain-http LAN address would never send it back.
+    const secure = origin.startsWith('https://');
+    reply.setCookie(secure ? SECURE_SESSION_COOKIE : SESSION_COOKIE, token, {
       httpOnly: true,
-      // Secure when this address is HTTPS; a plain-http LAN address would never send it back.
-      secure: origin.startsWith('https://'),
+      secure,
       sameSite: 'lax',
       path: '/',
       maxAge: SESSION_TTL_SECONDS,
@@ -87,9 +100,12 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   });
 
   app.decorate('authenticate', async (req: FastifyRequest) => {
+    // Over HTTPS the browser sends both cookies when both exist; the secure one wins.
+    const token = req.cookies[SECURE_SESSION_COOKIE] ?? req.cookies[SESSION_COOKIE];
+    if (!token) throw unauthorized();
     let payload: { sub: string; tv: number };
     try {
-      payload = await req.jwtVerify<{ sub: string; tv: number }>();
+      payload = app.jwt.verify<{ sub: string; tv: number }>(token);
     } catch {
       throw unauthorized();
     }
@@ -129,6 +145,11 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
     }
     req.log.error({ err }, 'unhandled error');
     return reply.status(500).send({ error: 'internal_error', message: 'Something went wrong' });
+  });
+
+  app.decorate('endSession', (reply: FastifyReply) => {
+    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    reply.clearCookie(SECURE_SESSION_COOKIE, { path: '/', secure: true });
   });
 
   app.get('/healthz', async () => {
