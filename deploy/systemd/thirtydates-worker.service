@@ -6,10 +6,10 @@ Requires=postgresql.service
 
 [Service]
 Type=simple
-User=thirtydates
-Group=thirtydates
-WorkingDirectory=/opt/thirtydates/app/apps/api
-EnvironmentFile=/etc/thirtydates/thirtydates.env
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__/apps/api
+EnvironmentFile=__APP_DIR__/.env
 ExecStart=/usr/bin/node dist/worker.js
 Restart=on-failure
 RestartSec=5

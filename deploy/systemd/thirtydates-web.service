@@ -5,14 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=thirtydates
-Group=thirtydates
-WorkingDirectory=/opt/thirtydates/app/apps/web
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__/apps/web
 Environment=NODE_ENV=production
 # 0.0.0.0 = reachable from your LAN on port 3000.
 # Set to 127.0.0.1 when Caddy (HTTPS) sits in front of it.
 Environment=WEB_HOST=0.0.0.0
-ExecStart=/usr/bin/node /opt/thirtydates/app/node_modules/next/dist/bin/next start -p 3000 -H ${WEB_HOST}
+ExecStart=/usr/bin/node __APP_DIR__/node_modules/next/dist/bin/next start -p 3000 -H ${WEB_HOST}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
