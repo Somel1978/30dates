@@ -11,19 +11,37 @@ db/migrations     PostgreSQL + PostGIS + pgvector schema
 
 ## Running locally
 
+You need Node 20+ and PostgreSQL 15+ with the PostGIS and pgvector extensions. No Docker.
+
+### Database
+
+Install natively, using whichever line matches your machine:
+
+| OS | Command |
+|---|---|
+| macOS (Homebrew) | `brew install postgresql@16 postgis pgvector && brew services start postgresql@16` |
+| Ubuntu / Debian | `sudo apt install postgresql-16 postgresql-16-postgis-3 postgresql-16-pgvector` |
+| Windows | Install from postgresql.org, then add PostGIS through Stack Builder, and pgvector following its README. |
+
+On macOS, Homebrew's superuser is your login name rather than `postgres`, so set `ADMIN_DATABASE_URL=postgres://$USER@localhost:5432/postgres`.
+
+A hosted Postgres works too, such as Neon or Supabase; both offer PostGIS and pgvector. Point `DATABASE_URL` at it and enable the two extensions in its dashboard. Skip `db:setup` if the provider has already created your role and database.
+
+### App
+
 ```bash
 cp .env.example .env              # then set JWT_SECRET, ESCROW_PAIR_SALT, CRON_SECRET
-docker compose up -d              # Postgres 16 + PostGIS + pgvector, Mailpit on :8025
 npm install
 npm run build -w @thirtydates/shared
 set -a; . ./.env; set +a
+npm run db:setup                  # creates the app role, database and extensions (idempotent)
 npm run db:migrate
 npm run dev:api                   # :4000
 npm run dev:worker                # scheduled jobs
 npm run dev:web                   # :3000 (proxies /api to the API)
 ```
 
-Magic-link emails land in Mailpit (http://localhost:8025). If `SMTP_URL` is empty (development only), the link is written to the API log instead.
+With `SMTP_URL` empty (development only), magic-link emails aren't sent. The sign-in link is printed in the API log instead, so you can open it straight from the terminal. For real email, set `SMTP_URL` to any SMTP provider.
 
 **Demo data.** Run `npm run seed:demo -w @thirtydates/api -- you@example.com`. It creates 30 members around central London, three partner venues and an onboarded account for your email. It also deals this week's batch, and three of your cards have already stamped you. To see a particular phase, set `CLOCK_OVERRIDE=2026-10-21T10:00:00Z` (any ISO instant) for the API and seed. It is refused outside `NODE_ENV=development`.
 
@@ -34,7 +52,7 @@ Magic-link emails land in Mailpit (http://localhost:8025). If `SMTP_URL` is empt
 **Tests.** They run against a real database:
 
 ```bash
-TEST_ADMIN_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
+TEST_ADMIN_DATABASE_URL=postgres://postgres@localhost:5432/postgres npm test
 ```
 
 The harness recreates `thirtydates_test` and runs as the non-superuser `thirtydates_app` role, so row-level security is really enforced.

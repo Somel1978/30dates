@@ -15,7 +15,8 @@
     "import:postal-codes": "tsx src/scripts/importPostalCodes.ts",
     "import:venues": "tsx src/scripts/importVenues.ts",
     "test": "vitest run",
-    "seed:demo": "tsx src/scripts/seedDemo.ts"
+    "seed:demo": "tsx src/scripts/seedDemo.ts",
+    "db:setup": "tsx src/db/setup.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.1",
