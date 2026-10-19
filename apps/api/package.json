@@ -1,0 +1,39 @@
+{
+  "name": "@thirtydates/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "worker:dev": "tsx watch src/worker.ts",
+    "worker": "node dist/worker.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "import:postal-codes": "tsx src/scripts/importPostalCodes.ts",
+    "import:venues": "tsx src/scripts/importVenues.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/jwt": "^9.0.1",
+    "@fastify/multipart": "^9.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@thirtydates/shared": "0.1.0",
+    "croner": "^9.0.0",
+    "fastify": "^5.1.0",
+    "nodemailer": "^6.9.16",
+    "pg": "^8.13.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/nodemailer": "^6.4.16",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

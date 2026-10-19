@@ -1,0 +1,22 @@
+{
+  "name": "thirtydates",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Zero-burnout, non-rotating relationship platform for adults aged 30 to 55.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "npm run build -w @thirtydates/shared && npm run build -w @thirtydates/api && npm run build -w @thirtydates/web",
+    "dev:api": "npm run dev -w @thirtydates/api",
+    "dev:worker": "npm run worker:dev -w @thirtydates/api",
+    "dev:web": "npm run dev -w @thirtydates/web",
+    "db:migrate": "npm run migrate -w @thirtydates/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
