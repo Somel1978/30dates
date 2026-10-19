@@ -1,39 +1,40 @@
 'use client';
 
-import type {
-  BatchCard,
-  CardLine,
-  CurrentBatchResponse,
-  MatchSummary,
-  MutualCard as MutualCardData,
-  ResonanceStamp,
-  SignalResponse,
-} from '@thirtydates/shared';
+import type { BatchCard, CurrentBatchResponse, MatchSummary } from '@thirtydates/shared';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { ExchangeCard } from '@/components/ExchangeCard';
 import { FreezeVault } from '@/components/FreezeVault';
 import { MondayCard } from '@/components/MondayCard';
-import { MutualCard } from '@/components/MutualCard';
-import { ResonanceStampModal } from '@/components/ResonanceStampModal';
-import { ScenarioSheet } from '@/components/ScenarioSheet';
 import { WeekBanner } from '@/components/WeekBanner';
 import { BottomSheet, Button, Notice, Panel, Spinner, WeeklyTable } from '@/components/primitives';
 import { ApiError, api, useResource } from '@/lib/api';
-import { formatDateTime, haptic } from '@/lib/format';
 import { useDevToolsAvailable } from '@/lib/devTools';
+import { formatDateTime, haptic } from '@/lib/format';
 import { useMemberSession } from '@/lib/session';
 
-type Confirm =
-  | { kind: 'pass'; card: BatchCard }
-  | { kind: 'freeze'; card: BatchCard }
-  | { kind: 'signal'; card: MutualCardData };
+type Confirm = { kind: 'select' | 'pass' | 'freeze'; card: BatchCard };
 
-const BRIDGE_STATUS: Record<MatchSummary['status'], string> = {
-  bridging: 'Choose your First-Meet Bridge',
+const MATCH_STATUS: Record<MatchSummary['status'], string> = {
+  bridging: 'Choose a time for coffee or wine',
   scheduled: 'First meeting scheduled',
   raincheck_pending: 'Raincheck pending',
   met: 'You have met',
   expired: 'Closed',
+};
+
+const CONFIRM_COPY: Record<Confirm['kind'], { title: string; body: string; action: string }> = {
+  select: {
+    title: 'Select this profile?',
+    body: 'Your selection goes into blind escrow. They never learn of it unless they select you too, and then a voice exchange opens on Wednesday.',
+    action: 'Select',
+  },
+  pass: { title: 'Pass on this card?', body: 'Passing is final for this week and completely silent.', action: 'Pass' },
+  freeze: {
+    title: 'Freeze this card?',
+    body: 'This spends your one Freeze Token for the week. The card comes back in next Monday’s deal.',
+    action: 'Freeze',
+  },
 };
 
 export default function WeeklyDashboard() {
@@ -42,9 +43,7 @@ export default function WeeklyDashboard() {
   const batch = useResource<CurrentBatchResponse>(session.ready ? '/batches/current' : null, 60_000);
   const matches = useResource<MatchSummary[]>(session.ready ? '/matches' : null, 120_000);
 
-  const [stampTarget, setStampTarget] = useState<{ card: BatchCard; line: CardLine } | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [scenarioCard, setScenarioCard] = useState<MutualCardData | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'muted' | 'error'; text: string } | null>(null);
 
@@ -55,7 +54,7 @@ export default function WeeklyDashboard() {
   const [overVault, setOverVault] = useState(false);
 
   const data = batch.data;
-  const interactive = data?.phase === 'validation';
+  const interactive = data?.phase === 'selection';
   const canFreeze = !!interactive && !!data?.freeze.token_available && !data.freeze.frozen_user_id;
 
   const run = useCallback(
@@ -131,30 +130,15 @@ export default function WeeklyDashboard() {
   const frozenCard = data.cards.find((c) => c.frozen);
   const liveMatches = (matches.data ?? []).filter((m) => m.status !== 'expired');
 
-  const stamp = async (resonance: ResonanceStamp) => {
-    if (!stampTarget) return;
-    await api('/escrow/validate', {
-      method: 'POST',
-      body: { target_user_id: stampTarget.card.user_id, resonance_stamp_type: resonance, card_line: stampTarget.line },
-    });
-    await batch.reload();
-  };
-
   const confirmAction = async () => {
     if (!confirm) return;
-    const current = confirm;
+    const { kind, card } = confirm;
     setConfirm(null);
-    if (current.kind === 'pass') {
-      await run(() => api('/escrow/pass', { method: 'POST', body: { target_user_id: current.card.user_id } }));
-    } else if (current.kind === 'freeze') {
-      await freeze(current.card);
-    } else {
-      await run(async () => {
-        const res = await api<SignalResponse>('/escrow/signal', { method: 'POST', body: { target_user_id: current.card.user_id } });
-        haptic([8, 40, 14]);
-        if (res.match_id) setMessage({ tone: 'muted', text: 'It’s mutual. Your chat is open.' });
-      }, 'Signal sealed. If it’s mutual, your chat opens tonight.');
-    }
+    if (kind === 'freeze') return freeze(card);
+    await run(async () => {
+      await api(kind === 'select' ? '/escrow/select' : '/escrow/pass', { method: 'POST', body: { target_user_id: card.user_id } });
+      haptic(kind === 'select' ? [8, 40, 14] : 8);
+    });
   };
 
   return (
@@ -169,14 +153,14 @@ export default function WeeklyDashboard() {
 
       {liveMatches.length > 0 && (
         <Panel className="mb-8 p-5">
-          <p className="eyebrow mb-3">Your matches</p>
+          <p className="eyebrow mb-3">Your First-Meet Bridges</p>
           <ul role="list" className="divide-y divide-line/60">
             {liveMatches.map((m) => (
               <li key={m.id}>
                 <Link href={`/matches/${m.id}`} className="flex min-h-touch items-center justify-between gap-4 py-3">
                   <span className="font-serif text-xl">{m.counterpart.first_name}</span>
                   <span className="text-right text-sm text-muted">
-                    {m.event && m.status === 'scheduled' ? formatDateTime(m.event.starts_at) : BRIDGE_STATUS[m.status]}
+                    {m.event && m.status === 'scheduled' ? formatDateTime(m.event.starts_at) : MATCH_STATUS[m.status]}
                     <span aria-hidden="true"> →</span>
                   </span>
                 </Link>
@@ -186,29 +170,17 @@ export default function WeeklyDashboard() {
         </Panel>
       )}
 
-      {data.mutual.length > 0 && (
-        <section className="mb-10" aria-labelledby="mutual-heading">
-          <h2 id="mutual-heading" className="mb-1 text-2xl">
-            {data.phase === 'reveal' || data.phase === 'signal' ? 'Sunday Reveal' : 'Mutual resonance'}
+      {data.exchanges.length > 0 && (
+        <section className="mb-10" aria-labelledby="exchanges-heading">
+          <h2 id="exchanges-heading" className="mb-1 text-2xl">
+            Voice exchanges
           </h2>
           <p className="mb-5 text-sm text-muted">
-            {data.phase === 'signal'
-              ? 'Choose your #1 Signal. If they choose you too, the chat opens.'
-              : data.phase === 'reveal'
-                ? 'Names and photos are unblurred. The #1 Signal opens this evening.'
-                : 'You both stamped each other. Names and photos unblur on Sunday morning.'}
+            You selected each other. Ask 2–3 questions, answer theirs by voice, and when you both lock, names and photos unblur together.
           </p>
           <ul role="list" className="grid gap-5 md:grid-cols-2">
-            {data.mutual.map((card) => (
-              <MutualCard
-                key={card.user_id}
-                card={card}
-                phase={data.phase}
-                signalTargetId={data.my_signal?.target_user_id ?? null}
-                matchId={data.my_signal?.match_id ?? null}
-                onOpenScenarios={setScenarioCard}
-                onSignal={(c) => setConfirm({ kind: 'signal', card: c })}
-              />
+            {data.exchanges.map((x) => (
+              <ExchangeCard key={x.id} exchange={x} serverNow={data.server_now} />
             ))}
           </ul>
         </section>
@@ -216,30 +188,27 @@ export default function WeeklyDashboard() {
 
       {data.cards.length > 0 ? (
         <div className={interactive ? 'pb-24' : undefined}>
-        <WeeklyTable
-          title="This week’s table"
-          caption={data.cards.length < 6 ? `${data.cards.length} introductions this week` : 'Six introductions'}
-        >
-          {data.cards.map((card) => (
-            <MondayCard
-              key={card.user_id}
-              card={card}
-              interactive={!!interactive}
-              stampsRemaining={data.stamps_remaining}
-              canFreeze={canFreeze && !card.carried_over}
-              onStampRequest={(c, line) => setStampTarget({ card: c, line })}
-              onPass={(c) => setConfirm({ kind: 'pass', card: c })}
-              onFreeze={(c) => {
-                if (suppressTap.current) {
-                  suppressTap.current = false;
-                  return;
-                }
-                setConfirm({ kind: 'freeze', card: c });
-              }}
-              onDragStart={startDrag}
-            />
-          ))}
-        </WeeklyTable>
+          <WeeklyTable title="This week’s table" caption={data.cards.length < 6 ? `${data.cards.length} introductions this week` : 'Six introductions'}>
+            {data.cards.map((card) => (
+              <MondayCard
+                key={card.user_id}
+                card={card}
+                interactive={!!interactive}
+                selectionsRemaining={data.selections_remaining}
+                canFreeze={canFreeze && !card.carried_over}
+                onSelect={(c) => setConfirm({ kind: 'select', card: c })}
+                onPass={(c) => setConfirm({ kind: 'pass', card: c })}
+                onFreeze={(c) => {
+                  if (suppressTap.current) {
+                    suppressTap.current = false;
+                    return;
+                  }
+                  setConfirm({ kind: 'freeze', card: c });
+                }}
+                onDragStart={startDrag}
+              />
+            ))}
+          </WeeklyTable>
         </div>
       ) : (
         <Panel className="p-8 text-center">
@@ -250,8 +219,8 @@ export default function WeeklyDashboard() {
             {data.phase === 'awaiting_deal'
               ? 'Six faceless introductions arrive Monday at 07:00 UTC.'
               : interactive
-                ? 'Nobody in your radius and age window is free to be dealt yet. We check every hour until Saturday night, and new cards appear here as members join.'
-                : 'Stamps are closed for this week. Your next introductions arrive Monday at 07:00 UTC.'}
+                ? 'Nobody in your radius and age window is free to be dealt yet. We check every hour until Tuesday night, and new cards appear here as members join.'
+                : 'Selection is closed for this week. Your next introductions arrive Monday at 07:00 UTC.'}
           </p>
           {devTools && (
             <Link href="/test" className="tap mt-5 rounded-full bg-accent px-6 text-sm font-medium text-canvas">
@@ -284,40 +253,17 @@ export default function WeeklyDashboard() {
         </div>
       )}
 
-      <ResonanceStampModal
-        open={stampTarget !== null}
-        line={stampTarget?.line ?? 'badges'}
-        stampsRemaining={data.stamps_remaining}
-        onClose={() => setStampTarget(null)}
-        onSelect={stamp}
-      />
-
-      {scenarioCard && (
-        <ScenarioSheet
-          open
-          targetId={scenarioCard.user_id}
-          onClose={() => setScenarioCard(null)}
-          onAnswered={() => void batch.reload()}
-        />
-      )}
-
-      <BottomSheet
-        open={confirm !== null}
-        title={confirm?.kind === 'pass' ? 'Pass on this card?' : confirm?.kind === 'freeze' ? 'Freeze this card?' : 'Send your #1 Signal?'}
-        onClose={() => setConfirm(null)}
-      >
-        <p className="text-muted">
-          {confirm?.kind === 'pass' && 'Passing is final for this week and completely silent.'}
-          {confirm?.kind === 'freeze' && 'This spends your one Freeze Token for the week. The card comes back in next Monday’s deal.'}
-          {confirm?.kind === 'signal' &&
-            `Your #1 Signal for ${confirm.card.revealed?.first_name ?? 'them'} is sealed in escrow. It can’t be changed this week.`}
-        </p>
+      <BottomSheet open={confirm !== null} title={confirm ? CONFIRM_COPY[confirm.kind].title : ''} onClose={() => setConfirm(null)}>
+        <p className="text-muted">{confirm && CONFIRM_COPY[confirm.kind].body}</p>
+        {confirm?.kind === 'select' && (
+          <p className="mt-2 text-sm text-muted">{data.selections_remaining} of 3 selections left this week.</p>
+        )}
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirm(null)}>
             Cancel
           </Button>
           <Button onClick={confirmAction} busy={busy}>
-            {confirm?.kind === 'pass' ? 'Pass' : confirm?.kind === 'freeze' ? 'Freeze' : 'Send signal'}
+            {confirm && CONFIRM_COPY[confirm.kind].action}
           </Button>
         </div>
       </BottomSheet>

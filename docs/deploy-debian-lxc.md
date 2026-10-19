@@ -175,7 +175,7 @@ Check that `DATABASE_URL` has a long password after `thirtydates_app:`. If it sh
 
 The hostname entry only works if your router or local DNS resolves `30plus` (or whatever you named the container). Otherwise just use the IP.
 
-**Never change `ESCROW_PAIR_SALT` after members join.** It keys the hashed pair identifiers, so changing it orphans every pending stamp.
+**Never change `ESCROW_PAIR_SALT` after members join.** It keys the hashed pair identifiers, so changing it orphans every pending selection.
 
 `.env` is git-ignored, so `git pull` never overwrites it.
 
@@ -193,7 +193,7 @@ You should see `applied 001_init.sql`. The build takes a few minutes. If it gets
 
 ## 8. systemd services (run as your user)
 
-Three services: the API, the scheduler (the Monday 07:00 deal, the Sunday 06:00 reveal and maintenance) and the web app. The unit files in `deploy/systemd/` are templates; this fills in your username and home directory as it installs them:
+Three services: the API, the scheduler (the Monday 07:00 deal, the Wednesday–Friday voice exchange transitions and maintenance) and the web app. The unit files in `deploy/systemd/` are templates; this fills in your username and home directory as it installs them:
 
 ```bash
 for f in ~/30dates/deploy/systemd/thirtydates-*.service; do
@@ -221,12 +221,13 @@ If `journalctl` says you lack permission, add yourself to the log readers once w
 On a fresh install you're the only member, so the week is empty. With `NODE_ENV=development` (the LAN-testing setting), sign in, finish your profile, and open **Test tools** in the top menu. Its buttons walk the whole week in a few minutes:
 
 1. **Add 24**: creates members built to match *you* (nearby, inside your age window, the genders you seek, your life-architecture answers).
-2. **Monday**, then **Deal now**: your six cards appear on *This week*.
-3. **Stamp me ×3**: three cards silently stamp you. Stamp them back (hold a line on a card) to form mutual pairs.
-4. **Wednesday**: unlocks the scenario exchange on your mutual pairs.
-5. **Sunday 06:05**: runs the reveal; names unblur.
-6. **Sunday 18:05**: send your #1 Signal, then **Signal me**. You get a match, chat and the First-Meet Bridge.
-7. **Next Monday**: new week, new cards. **Real time** puts the clock back.
+2. **Monday**, then **Deal now**: six faceless cards appear on *This week*.
+3. **Select me ×3**: three cards silently select you. Select them back to form mutual pairs (up to 3 a week).
+4. **Wednesday**: selection closes and each mutual pair gets a voice exchange. Open it and drop 2–3 questions. **They act** makes them pick theirs.
+5. **Thursday**: the 36-hour Response Clock starts. Record your answers (re-record freely, drafts stay on your device) and lock. **They act** makes them lock generated answers. The moment both have locked, names and photos unblur, both voice notes play, and the First-Meet Bridge opens.
+6. Choose coffee/wine windows on the match within 72 hours. **Friday 12:05** closes any exchange that wasn't finished; **Next Monday** starts a new week. **Real time** puts the clock back.
+
+Recording your own answers needs HTTPS: see 10A.
 
 The clock moves only inside the API process and resets when the API restarts. The page and its endpoints don't exist when `NODE_ENV=production`.
 
@@ -244,19 +245,32 @@ Outside testing, members who join mid-week are dealt cards within the hour (unti
 
 ## 10A. LAN testing (no domain, no email)
 
-You're done. From a computer on the same network, open:
+**Voice notes need HTTPS.** Browsers only allow microphone recording on `https://` pages (or `localhost`). Over plain `http://<container-ip>:3000` you can browse and select, but the voice exchange recorder is blocked. Put Caddy in front with its own internal certificate; no domain is needed:
 
-```
-http://<container-ip>:3000
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+sudo apt update && sudo apt install -y caddy
+
+IP=$(hostname -I | awk '{print $1}')
+printf 'https://%s, https://%s {\n\ttls internal\n\treverse_proxy 127.0.0.1:3000\n}\n' "$IP" "$(hostname)" | sudo tee /etc/caddy/Caddyfile > /dev/null
+sudo systemctl reload caddy
+
+# Let the app accept the https addresses (keep the http ones too if you like):
+sed -i "s|^WEB_ORIGIN=.*|WEB_ORIGIN=https://$IP,https://$(hostname),http://$IP:3000|" ~/30dates/.env
+sudo systemctl restart thirtydates-api
 ```
 
-Enter your email. No email is sent; the sign-in link is printed in the API log:
+Open `https://<container-ip>`. The browser warns once that the certificate isn't trusted, because Caddy signed it itself. Accept it (in Chrome: *Advanced → Proceed*) and the microphone works. To get rid of the warning, copy Caddy's root certificate (`sudo cat /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`) to your devices and trust it.
+
+**Signing in.** No email is sent; the sign-in link is printed in the API log:
 
 ```bash
 journalctl -u thirtydates-api -n 50 --no-pager | grep -o 'http[^"]*auth/verify?token=[^"\\ ]*'
 ```
 
-Open that link in the same browser. If the container runs a firewall, allow port 3000 from your LAN only. The API (port 4000) listens on localhost and is not reachable from outside.
+Open that link in the same browser. If the container runs a firewall, allow ports 443 (and 3000 if you keep plain http) from your LAN only. The API (port 4000) listens on localhost and is not reachable from outside.
 
 ## 10B. Public with HTTPS
 

@@ -19,8 +19,8 @@ export default function OnboardingPage() {
       <div className="mx-auto max-w-xl pt-6">
         <h1 className="text-4xl">You’re on the list</h1>
         <p className="mt-3 text-muted">
-          Add up to three photos. They stay sealed until a mutual Sunday reveal. You can change everything later from your
-          profile.
+          Add up to three photos. They stay sealed until you and a mutual selection have both locked your voice answers. You can
+          change everything later from your profile.
         </p>
         <Panel className="mt-6 p-6">
           <PhotoUploader photos={session.me.photos} onChange={() => void session.reload()} />

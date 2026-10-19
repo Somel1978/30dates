@@ -2,7 +2,8 @@ export const PLATFORM_MIN_AGE = 30;
 export const PLATFORM_MAX_AGE = 55;
 export const AGE_WINDOW_HALF_SPAN = 7;
 export const CARDS_PER_BATCH = 6;
-export const MAX_WEEKLY_VALIDATIONS = 3;
+/** Whole profiles a member may select into blind escrow each week. */
+export const MAX_WEEKLY_SELECTIONS = 3;
 
 export const GENDERS = ['man', 'woman', 'non_binary'] as const;
 export type Gender = (typeof GENDERS)[number];
@@ -93,6 +94,7 @@ export const GATE_LABELS = {
   financial_rhythm: Record<FinancialRhythm, string>;
 };
 
+/** Onboarding questions only. Gates filter invisibly and are never shown on a card. */
 export const GATE_QUESTIONS: Record<keyof LifeArchitectureGates, string> = {
   family_goal: 'Where are you on family?',
   living_architecture: 'How do you want to live with a partner?',
@@ -100,43 +102,15 @@ export const GATE_QUESTIONS: Record<keyof LifeArchitectureGates, string> = {
   financial_rhythm: 'Your money rhythm',
 };
 
-export function gateBadges(g: LifeArchitectureGates): string[] {
-  return [
-    GATE_LABELS.family_goal[g.family_goal],
-    GATE_LABELS.living_architecture[g.living_architecture],
-    GATE_LABELS.mobility[g.mobility],
-    GATE_LABELS.financial_rhythm[g.financial_rhythm],
-  ];
-}
-
-// ---------------------------------------------------------------------------
-// Resonance stamps & card lines
-// ---------------------------------------------------------------------------
-export const RESONANCE_STAMPS = ['same_flaw', 'balance_out', 'rhythm_agree', 'made_me_smile'] as const;
-export type ResonanceStamp = (typeof RESONANCE_STAMPS)[number];
-
-export const STAMP_META: Record<ResonanceStamp, { glyph: string; label: string }> = {
-  same_flaw: { glyph: '📌', label: 'I have the exact same flaw' },
-  balance_out: { glyph: '⚖️', label: "We'd balance each other out" },
-  rhythm_agree: { glyph: '☕', label: 'Hard agree on this rhythm' },
-  made_me_smile: { glyph: '💡', label: 'This made me smile' },
-};
-
-export const CARD_LINES = ['badges', 'interest_1', 'interest_2', 'interest_3', 'flaw', 'upside'] as const;
-export type CardLine = (typeof CARD_LINES)[number];
 
 // ---------------------------------------------------------------------------
 // First-Meet Bridge
 // ---------------------------------------------------------------------------
-export const BRIDGE_MODES = ['audio_lounge', 'coffee_audit'] as const;
+/** The First-Meet Bridge is an in-person coffee or wine audit. */
+export const BRIDGE_MODES = ['coffee_audit'] as const;
 export type BridgeMode = (typeof BRIDGE_MODES)[number];
 
 export const BRIDGE_MODE_META: Record<BridgeMode, { title: string; detail: string; minutes: number }> = {
-  audio_lounge: {
-    title: '10-minute audio lounge',
-    detail: 'Camera off. Weekday evenings at 21:00.',
-    minutes: 10,
-  },
   coffee_audit: {
     title: '45-minute coffee or wine',
     detail: 'A vetted partner venue near your midpoint.',
@@ -144,11 +118,10 @@ export const BRIDGE_MODE_META: Record<BridgeMode, { title: string; detail: strin
   },
 };
 
-export const AUDIO_LOUNGE_LOCAL_HOUR = 21;
 export const COFFEE_FIRST_LOCAL_HOUR = 8;
 export const COFFEE_LAST_LOCAL_HOUR = 20;
-export const BRIDGE_HORIZON_DAYS = 14;
-export const BRIDGING_TIMEOUT_DAYS = 7;
+/** The first meeting happens within 72 hours of the release. */
+export const BRIDGE_WINDOW_HOURS = 72;
 export const RAINCHECK_MIN_SHIFT_HOURS = 48;
 export const RAINCHECK_MAX_SHIFT_HOURS = 72;
 export const RAINCHECK_ACCEPT_WINDOW_HOURS = 24;

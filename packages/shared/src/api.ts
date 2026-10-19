@@ -1,9 +1,7 @@
 import type {
   BridgeMode,
-  CardLine,
   Gender,
   LifeArchitectureGates,
-  ResonanceStamp,
   Seeks,
 } from './domain.js';
 import type { WeekPhase } from './week.js';
@@ -65,8 +63,8 @@ export interface DevStatus {
   batch_week: string;
   members: number;
   my_cards: number;
-  stamped_me: number;
-  mutual: number;
+  selected_me: number;
+  exchanges: number;
   matches: number;
 }
 
@@ -77,11 +75,11 @@ export interface CardInterest {
   receipt: string;
 }
 
+/** A faceless, nameless Monday card: Life Rhythm, behavioral interests and the coin. No gates. */
 export interface CardProfile {
   user_id: string;
   distance_km: number;
-  badges: string[];
-  gates: LifeArchitectureGates;
+  rhythm: string[];
   interests: CardInterest[];
   coin: { flaw: string; upside: string };
 }
@@ -90,26 +88,43 @@ export interface BatchCard extends CardProfile {
   carried_over: boolean;
   frozen: boolean;
   my_action: 'validated' | 'passed' | null;
-  my_stamp: ResonanceStamp | null;
-  my_stamp_line: CardLine | null;
 }
 
-export interface MutualCard extends CardProfile {
-  scenario_exchange: {
-    unlocked: boolean;
-    answered_by_me: number;
-    comparison_ready: boolean;
-  };
+export type ExchangeStatus = 'questions' | 'answering' | 'released' | 'expired';
+
+/** A mutual pair's Stage 3 voice exchange, as it appears on the weekly dashboard. */
+export interface ExchangeSummary {
+  id: string;
+  status: ExchangeStatus;
+  counterpart: CardProfile;
+  my_pick_count: number;
+  i_locked: boolean;
+  questions_close_at: string;
+  answers_close_at: string;
+  /** Set the instant both have locked: the simultaneous modality switch. */
   revealed: { first_name: string; photo_ids: string[] } | null;
+  match_id: string | null;
+}
+
+export interface ExchangeDetail extends ExchangeSummary {
+  server_now: string;
+  /** The bank to pick from (while picking questions). */
+  prompt_bank: { key: string; text: string }[];
+  /** Questions I chose for them. */
+  my_picks: string[];
+  /** Questions they chose for me; visible once the Response Clock starts. */
+  questions_for_me: { key: string; text: string }[];
+  /** Their answers, playable only after release. */
+  their_answers: { prompt_key: string; text: string; audio_url: string }[];
+  /** My own locked answers (playable by me after locking). */
+  my_answers: { prompt_key: string; text: string; audio_url: string }[];
 }
 
 export interface WeekClockDto {
   deal_at: string;
-  scenario_unlock_at: string;
-  stamps_close_at: string;
-  reveal_at: string;
-  signal_opens_at: string;
-  signal_closes_at: string;
+  selection_closes_at: string;
+  questions_close_at: string;
+  answers_close_at: string;
   next_deal_at: string;
 }
 
@@ -119,37 +134,17 @@ export interface CurrentBatchResponse {
   server_now: string;
   clock: WeekClockDto;
   cards: BatchCard[];
-  stamps_remaining: number;
+  selections_remaining: number;
   freeze: {
     token_available: boolean;
     used_for: 'card_carry' | 'raincheck' | null;
     frozen_user_id: string | null;
   };
-  mutual: MutualCard[];
-  my_signal: { target_user_id: string; match_id: string | null } | null;
+  exchanges: ExchangeSummary[];
 }
 
-export interface ValidateRequest {
+export interface SelectRequest {
   target_user_id: string;
-  resonance_stamp_type: ResonanceStamp;
-  card_line: CardLine;
-}
-
-export interface SignalResponse {
-  accepted: true;
-  match_id: string | null;
-}
-
-export interface ScenarioExchangeResponse {
-  batch_week: string;
-  comparison_ready: boolean;
-  scenarios: {
-    key: string;
-    prompt: string;
-    stances: { key: string; label: string }[];
-    my_stance: string | null;
-    their_stance: string | null;
-  }[];
 }
 
 export interface VenueDto {
@@ -187,6 +182,11 @@ export interface MatchSummary {
 }
 
 export interface MatchDetail extends MatchSummary {
+  /** Venue auto-assigned at the release, within 3 km of the geographic midpoint. */
+  suggested_venue: VenueDto | null;
+  /** The first meeting must start before this (72 hours after the release). */
+  bridge_window_closes_at: string;
+  server_now: string;
   bridge: {
     state: BridgeState;
     my_preference: { mode: BridgeMode; slots: string[] } | null;

@@ -15,7 +15,7 @@ function downloadIcs(match: MatchDetail) {
   const start = new Date(event.starts_at);
   const end = new Date(start.getTime() + event.duration_minutes * 60_000);
   const title = `${BRIDGE_MODE_META[event.mode].title} with ${match.counterpart.first_name}`;
-  const location = event.venue ? `${event.venue.name}, ${event.venue.address}` : 'Thirty Dates audio lounge';
+  const location = event.venue ? `${event.venue.name}, ${event.venue.address}` : 'Partner venue';
   const escape = (s: string) => s.replace(/([,;\\])/g, '\\$1');
   const ics = [
     'BEGIN:VCALENDAR',
@@ -78,7 +78,6 @@ export function EventPanel({ match, onUpdated }: { match: MatchDetail; onUpdated
           </a>
         </p>
       )}
-      {event.mode === 'audio_lounge' && <p className="mt-1 text-sm text-muted">Camera stays off. Ten minutes, then it closes gently.</p>}
 
       {event.raincheck && (
         <div className="mt-5 rounded-2xl border border-brass/40 bg-brass/5 p-4">

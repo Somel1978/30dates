@@ -1,6 +1,13 @@
 # Thirty Dates
 
-A zero-burnout, non-rotating relationship platform for adults aged 30–55. Every Monday at 07:00 UTC each member is dealt six faceless cards. Interest is held in a simultaneous blind escrow. Names and photos unblur only for mutual pairs on Sunday morning, and a match forms only when both send each other their Sunday #1 Signal.
+A zero-burnout, non-rotating, character-first relationship platform for adults aged 30–55. The week follows four stages:
+
+1. **Invisible structural filtering.** Age bounds, mutual orientation, radius and life-architecture gates are applied silently before the deal. Members never see gate badges.
+2. **Monday: blind whole-card selection.** Six faceless, nameless cards (Life Rhythm, behavioral interests, the Flaw + Upside coin). Up to three whole profiles go into simultaneous blind escrow, plus one optional Freeze Token.
+3. **Mid-week: asynchronous voice Q&A.** Mutual selections unlock a voice exchange. Each drops 2–3 questions from the prompt bank; a 36-hour Response Clock governs the answers. Drafts stay on the device, and both vaults stay double-blind until both lock.
+4. **The modality switch.** The instant both lock, first names and photos unblur together, both voice notes become playable, and the First-Meet Bridge opens: a 45-minute coffee or wine audit at a curated venue near the midpoint, within 72 hours.
+
+There are no swipes, feeds or "likes you" queues, and no generative AI anywhere in the discovery path.
 
 ```
 packages/shared   Domain constants, deterministic vector builder, week clock, tz helpers, API contracts
@@ -45,7 +52,9 @@ npm run dev:web                   # :3000 (proxies /api to the API)
 
 With `SMTP_URL` empty (development only), magic-link emails aren't sent. The sign-in link is printed in the API log instead, so you can open it straight from the terminal. For real email, set `SMTP_URL` to any SMTP provider.
 
-**Demo data.** Run `npm run seed:demo -w @thirtydates/api -- you@example.com`. It creates 30 members around central London, three partner venues and an onboarded account for your email. It also deals this week's batch, and three of your cards have already stamped you. To see a particular phase, set `CLOCK_OVERRIDE=2026-10-21T10:00:00Z` (any ISO instant) for the API and seed. It is refused outside `NODE_ENV=development`.
+**Testing alone.** With `NODE_ENV=development`, sign up, finish your profile and open **Test tools** in the menu. It seeds members built to match you, deals, has cards select you, moves the clock through the week, and plays the other side of each voice exchange. `npm run seed:demo -w @thirtydates/api -- you@example.com` does the seeding from the command line. None of this exists when `NODE_ENV=production`.
+
+**Voice recording needs HTTPS** (or `localhost`): browsers block the microphone on plain-http pages. See the deployment guide for a LAN setup with Caddy.
 
 **Reference data**
 - `npm run import:postal-codes -w @thirtydates/api -- allCountries.txt`: GeoNames postal export, used when a member shares no location.
@@ -63,16 +72,15 @@ The harness recreates `thirtydates_test` and runs as the non-superuser `thirtyda
 
 | When | What happens |
 |---|---|
-| Mon 07:00 | `monday-deal`: three-stage matcher deals up to 6 symmetric cards |
-| Mon 07:00 – Sat 24:00 | Up to 3 resonance stamps (long-press a card line), passes, one Freeze |
-| Wed 00:00 | Scenario exchange unlocks for mutually stamped pairs |
-| Sun 06:00 | `sunday-reveal`: unblur mutual pairs, carry frozen stakes, wipe the rest |
-| Sun 18:00 – 24:00 | #1 Signal; aligned signals create the match and chat thread |
-| Mon 00:00 | `signal-close`: unreciprocated signals deleted |
-| every 5 min | `bridge-maintenance`: raincheck expiry, completed meetings, 7-day bridge timeout |
-| daily 00:05 | `aged-out-sweep`: deactivate members who turned 56 |
+| Mon 07:00 | `monday-deal`: the three-stage matcher deals up to 6 symmetric cards |
+| Mon 07:00 – Wed 00:00 | Blind selection: up to 3 whole profiles, passes, one Freeze (`late-deal` tops up late joiners hourly) |
+| Wed 00:00 | Selection seals: frozen undecided stakes carry to next week, the rest are wiped; each mutual pair gets a voice exchange |
+| Wed | Each member drops 2–3 questions for the other (anyone who doesn't gets two assigned) |
+| Thu 00:00 – Fri 12:00 | 36-hour Response Clock: record locally, lock once; release happens the instant both lock |
+| Fri 12:00 | Exchanges without both locks close silently; their audio is deleted |
+| Release + 72 h | First-Meet Bridge window: shared coffee or wine slot locks automatically; otherwise the match closes kindly |
 
-The worker runs these on cron and catches up on start-up. Every job is idempotent, and each can also be triggered with `POST /api/cron/:job` and the header `x-cron-secret`. Phase 2's `POST /api/escrow/reveal` is the same reveal job.
+`exchange-tick` runs every minute and performs the Wednesday, Thursday and Friday transitions; each step is idempotent and catches up after downtime. Any job can also be triggered with `POST /api/cron/:job` and the header `x-cron-secret`.
 
 ## Matching engine (`apps/api/src/matching`)
 
@@ -86,26 +94,30 @@ The worker runs these on cron and catches up on start-up. Every job is idempoten
 
 The 32-d psychometric vector is built deterministically from onboarding answers (`packages/shared/src/vector.ts`): 12 one-hot gate dimensions plus 20 lifestyle trait axes projected from the interest catalog. No model is involved.
 
-## Blind escrow guarantees
+## Blind escrow and double-blind voice guarantees
 
 - `pair_hash = HMAC-SHA256(min(uuid) ‖ max(uuid), ESCROW_PAIR_SALT)`.
-- `escrow_vault` and `sunday_signals` use `FORCE ROW LEVEL SECURITY`. In a user transaction, a member can read a stake only after acting on it themselves, so an unreciprocated validation is invisible to its target. The `escrow_my_stakes` view projects only the caller's own side.
-- A pass never changes the validator's view mid-week. Wiping happens only at the Sunday reveal, which closes the side channel. Wiped rows are scrubbed of both user ids, actions, stamps and timestamps; a database constraint enforces this.
-- Validation responses are identical whatever the counterpart did.
-- **Freeze carry is one-sided.** Only the freezer sees the card again. The counterpart's sealed stake moves to next week instead of being wiped, so the frozen person never learns they were frozen.
-- **One Freeze Token per UTC week** covers both uses (carrying a card, or a raincheck).
+- `escrow_vault` uses `FORCE ROW LEVEL SECURITY`. In a user transaction, a member can read a stake only after acting on it themselves, so an unreciprocated selection is invisible to its target. The `escrow_my_stakes` view projects only the caller's own side.
+- **No side channel from passing.** A pass never changes the selector's view. Wiping happens only when selection seals on Wednesday, and wiped rows are scrubbed of both user ids, actions and timestamps (a database constraint enforces this).
+- **Selection is a whole-profile choice.** There are no stamps and no line tags.
+- **Freeze carry is one-sided.** Only the freezer sees the card again; the counterpart's sealed stake moves to next week, so they never learn they were frozen.
+- **Double-blind voice exchange:**
+  - Drafts live in the browser (IndexedDB) and upload only on lock, which is final.
+  - Neither member can see whether the other has locked.
+  - Audio, names and photos are released in the same transaction as the second lock.
+  - Expired exchanges delete their recordings.
+- **Audio and photos are checked by magic bytes** and served only to the people allowed to hear or see them.
 
 ## Decisions taken where the specs were silent
 
-- **Gate values.** `living_architecture` gains `flexible`. `mobility` is `rooted / open_to_relocate / location_independent`. `financial_rhythm` is `steady_saver / balanced / experience_first`. Compatibility is a seeded, editable table.
-- **"21:00 local"** for audio lounges is computed in the match's time zone, which is the lower UUID's zone (both members live within each other's radius). All storage and state machines stay in UTC.
-- **Venue choice.** The bridge locks the earliest common slot. Venues are ranked by suitable type (wine bar from 17:00), then distance to the midpoint, then curation score, within 3 km.
-- **Bridge preferences stay private.** If two members never align, the match expires after 7 days.
-- **Raincheck timing.** The meeting moves to the same local time 2 or 3 days later (48–72 h; audio lounges prefer a weekday), with DST tolerated.
-- **Photo privacy.** Photos are stored privately, checked by their file signature (magic bytes), and served only to the owner, a revealed mutual pair, or a match.
+- **Life Rhythm** is derived deterministically from a member's interests (the three strongest lifestyle traits in plain language), never from the structural gates.
+- **Voice timing.** Questions are open all Wednesday; the 36-hour Response Clock runs Thursday 00:00 to Friday 12:00 UTC for every pair, so the week stays synchronised.
+- **Recording limits.** Each answer is capped at 90 seconds. Re-takes are unlimited, and there are no editing tools.
+- **Venue choice.** A venue is auto-assigned at release (within 3 km of the midpoint). When the meeting locks, a wine bar is preferred for slots from 17:00 if one is near.
+- **Raincheck.** One Freeze Token per UTC week covers both card carries and rainchecks; a raincheck moves the meeting to the same local time 48 hours later, and the partner has 24 hours to accept.
 
 ## Not built yet
 
-- **Audio lounge transport.** The lounge is scheduled and shown, but there is no in-app audio call yet. That needs a WebRTC/TURN provider decision.
-- **Notifications.** There are no push or email notifications for reveal, signal or bridge events (silent by design today).
+- **Psychometric questionnaire.** The 32-d vector is built from life-architecture answers and interests; dedicated psychometric questions (conflict repair, attachment, etc.) still need a validated question set.
+- **Notifications.** There are no push or email notifications for exchange or bridge events.
 - **Safety and admin tooling.** There is no moderation, reporting queue or admin tooling beyond member blocking.

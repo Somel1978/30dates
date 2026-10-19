@@ -24,7 +24,7 @@ export default function MatchesPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-4xl">Matches</h1>
-      <p className="mt-2 text-muted">Formed when your Sunday #1 Signals align.</p>
+      <p className="mt-2 text-muted">Formed the moment you both lock your voice answers.</p>
       {matches.data.length === 0 ? (
         <Panel className="mt-8 p-8 text-center">
           <p className="text-muted">No matches yet. They’re rare on purpose.</p>

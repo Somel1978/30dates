@@ -10,10 +10,10 @@ import { useMemberSession } from '@/lib/session';
 
 const PHASE_LABEL: Record<DevStatus['phase'], string> = {
   awaiting_deal: 'Monday before 07:00: waiting for the deal',
-  validation: 'Week open: stamps, passes, freeze',
-  sealed: 'Sunday night: stamps sealed',
-  reveal: 'Sunday reveal: names and photos unblurred',
-  signal: 'Sunday evening: #1 Signal open',
+  selection: 'Monday–Tuesday: blind selection',
+  exchange_questions: 'Wednesday: choosing questions',
+  exchange_answers: 'Thursday–Friday noon: Response Clock running',
+  bridge: 'Friday afternoon–Sunday: First-Meet Bridge',
 };
 
 function Step({
@@ -83,7 +83,7 @@ export default function TestToolsPage() {
         <p className="eyebrow text-brass">Development only</p>
         <h1 className="mt-1 text-4xl">Test tools</h1>
         <p className="mt-2 text-muted">
-          Walk the whole week on your own: seed members built to match you, deal, get stamped, move the clock, get a match.
+          Walk the whole week on your own: seed members built to match you, deal, get selected, move the clock, exchange voice notes, reach the First-Meet Bridge.
         </p>
       </header>
 
@@ -101,8 +101,8 @@ export default function TestToolsPage() {
           {[
             ['Members', s.members],
             ['My cards', s.my_cards],
-            ['Stamped me', s.stamped_me],
-            ['Mutual', s.mutual],
+            ['Selected me', s.selected_me],
+            ['Exchanges', s.exchanges],
             ['Matches', s.matches],
           ].map(([k, v]) => (
             <div key={k} className="rounded-xl bg-raised/60 p-3">
@@ -122,7 +122,7 @@ export default function TestToolsPage() {
               Add 24
             </Button>
           </Step>
-          <Step n={2} title="Open the week" detail="Moves the clock to Monday 09:00 of this week if stamps are closed.">
+          <Step n={2} title="Open the week" detail="Moves the clock to Monday 09:00 of this week, when selection is open.">
             <Button variant="quiet" busy={busy === 'clock-monday'} onClick={() => clock('monday', 'Monday 09:00')}>
               Monday
             </Button>
@@ -132,30 +132,30 @@ export default function TestToolsPage() {
               Deal now
             </Button>
           </Step>
-          <Step n={4} title="Have my cards stamp me" detail="Three of your cards silently validate you. Stamp them back on “This week” to make a mutual pair.">
-            <Button variant="quiet" busy={busy === 'stamp'} onClick={() => run('stamp', '/dev/stamp-me', { count: 3 }, 'Three cards have stamped you (you can’t see which: that’s the escrow).')}>
-              Stamp me ×3
+          <Step n={4} title="Have my cards select me" detail="Three of your cards silently select you. Select them back on “This week” to make mutual pairs.">
+            <Button variant="quiet" busy={busy === 'select'} onClick={() => run('select', '/dev/select-me', { count: 3 }, 'Three cards have selected you (you can’t see which: that’s the escrow).')}>
+              Select me ×3
             </Button>
           </Step>
-          <Step n={5} title="Mid-week" detail="Wednesday unlocks the scenario exchange for mutual pairs.">
+          <Step n={5} title="Wednesday: questions" detail="Selection closes, unreciprocated selections are wiped, and each mutual pair gets a voice exchange. Drop your 2–3 questions.">
             <Button variant="quiet" busy={busy === 'clock-wednesday'} onClick={() => clock('wednesday', 'Wednesday 09:00')}>
               Wednesday
             </Button>
           </Step>
-          <Step n={6} title="Sunday reveal" detail="Runs the 06:00 reveal: names and photos unblur, unreciprocated stamps are wiped.">
-            <Button variant="quiet" busy={busy === 'clock-reveal'} onClick={() => clock('reveal', 'Sunday 06:05, reveal ran')}>
-              Sunday 06:05
+          <Step n={6} title="Thursday: Response Clock" detail="The 36-hour clock starts and you see their questions. Record and lock your answers on the exchange page.">
+            <Button variant="quiet" busy={busy === 'clock-thursday'} onClick={() => clock('thursday', 'Thursday 09:00')}>
+              Thursday
             </Button>
           </Step>
-          <Step n={7} title="Sunday signal" detail="Opens the #1 Signal. Send yours on “This week”, then have them signal you back.">
-            <Button variant="quiet" busy={busy === 'clock-signal'} onClick={() => clock('signal', 'Sunday 18:05')}>
-              Sunday 18:05
-            </Button>
-            <Button variant="quiet" busy={busy === 'signal'} onClick={() => run('signal', '/dev/signal-me', {}, 'Your mutual pairs have signalled you.')}>
-              Signal me
+          <Step n={7} title="Play the other side" detail="Your mutual pairs pick questions (Wednesday) or lock generated voice answers (Thursday). When both sides lock, names, photos and the bridge release instantly.">
+            <Button variant="quiet" busy={busy === 'act'} onClick={() => run('act', '/dev/counterparts-act', {}, 'Your mutual pairs have acted.')}>
+              They act
             </Button>
           </Step>
-          <Step n={8} title="Next week" detail="Closes signals and deals next Monday (cards never repeat, frozen cards carry over).">
+          <Step n={8} title="Friday noon" detail="The Response Clock runs out: unfinished exchanges close silently and their audio is deleted.">
+            <Button variant="quiet" busy={busy === 'clock-friday'} onClick={() => clock('friday', 'Friday 12:05')}>
+              Friday 12:05
+            </Button>
             <Button variant="quiet" busy={busy === 'clock-next_monday'} onClick={() => clock('next_monday', 'next Monday 07:05, deal ran')}>
               Next Monday
             </Button>

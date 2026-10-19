@@ -60,7 +60,7 @@ export default function ProfilePage() {
         <h2 id="photos-heading" className="text-2xl">
           Photos
         </h2>
-        <p className="mb-4 mt-1 text-sm text-muted">Shown only after a mutual Sunday reveal, and to your matches.</p>
+        <p className="mb-4 mt-1 text-sm text-muted">Released only when you and a mutual selection have both locked your voice answers.</p>
         <Panel className="p-6">
           <PhotoUploader photos={session.me.photos} onChange={() => void session.reload()} />
         </Panel>
@@ -136,7 +136,7 @@ export default function ProfilePage() {
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">
             <div>
               <p>Delete account</p>
-              <p className="text-sm text-muted">Removes your profile, photos, stamps and matches permanently.</p>
+              <p className="text-sm text-muted">Removes your profile, photos, voice notes and matches permanently.</p>
             </div>
             <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
               Delete…
@@ -147,7 +147,7 @@ export default function ProfilePage() {
       </section>
 
       <BottomSheet open={confirmDelete} title="Delete your account?" onClose={() => setConfirmDelete(false)}>
-        <p className="text-muted">This can’t be undone. Your profile, photos, stamps, matches and messages are erased.</p>
+        <p className="text-muted">This can’t be undone. Your profile, photos, voice notes, matches and messages are erased.</p>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
             Keep my account

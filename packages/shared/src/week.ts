@@ -1,12 +1,16 @@
 /**
  * The weekly ritual clock. Every boundary is a UTC instant; clients only format them.
  *
- *   Mon 00:00 ─ awaiting_deal ─ Mon 07:00 ─ validation ─ Sun 00:00 ─ sealed ─ Sun 06:00
- *   ─ reveal ─ Sun 18:00 ─ signal ─ Mon 00:00 (next week)
+ *   Mon 00:00 ─ awaiting_deal ─ Mon 07:00 ─ selection ─ Wed 00:00 ─ exchange_questions ─ Thu 00:00
+ *   ─ exchange_answers (36 h Response Clock) ─ Fri 12:00 ─ bridge ─ Mon 00:00 (next week)
  *
- * The mid-week scenario exchange unlocks Wed 00:00 for mutually validated pairs.
+ * Stage 2 (blind selection): six faceless cards, up to three whole profiles into blind escrow.
+ * Stage 3 (Wednesday): mutual pairs each pick 2–3 questions for the other from the prompt bank;
+ *   answers are recorded during the 36-hour Response Clock, double-blind until both lock.
+ * Stage 4: the instant both lock, names and photos unblur together and the First-Meet Bridge
+ *   opens. Exchanges still open when the clock runs out close silently.
  */
-export type WeekPhase = 'awaiting_deal' | 'validation' | 'sealed' | 'reveal' | 'signal';
+export type WeekPhase = 'awaiting_deal' | 'selection' | 'exchange_questions' | 'exchange_answers' | 'bridge';
 
 export interface WeekClock {
   /** ISO date (YYYY-MM-DD) of the Monday that identifies the batch week. */
@@ -14,16 +18,17 @@ export interface WeekClock {
   phase: WeekPhase;
   weekStart: Date;
   dealAt: Date;
-  scenarioUnlockAt: Date;
-  stampsCloseAt: Date;
-  revealAt: Date;
-  signalOpensAt: Date;
-  signalClosesAt: Date;
+  selectionClosesAt: Date;
+  questionsCloseAt: Date;
+  answersCloseAt: Date;
   nextDealAt: Date;
 }
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+
+/** Length of the Response Clock for voice answers. */
+export const RESPONSE_CLOCK_HOURS = 36;
 
 export function mondayOf(at: Date): Date {
   const d = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
@@ -46,24 +51,23 @@ export function addDays(isoDay: string, days: number): string {
 export function weekClockFor(batchWeek: string, now: Date): WeekClock {
   const weekStart = parseIsoDate(batchWeek);
   const t = weekStart.getTime();
+  const questionsCloseAt = new Date(t + 3 * DAY);
   const clock = {
     batchWeek,
     weekStart,
     dealAt: new Date(t + 7 * HOUR),
-    scenarioUnlockAt: new Date(t + 2 * DAY),
-    stampsCloseAt: new Date(t + 6 * DAY),
-    revealAt: new Date(t + 6 * DAY + 6 * HOUR),
-    signalOpensAt: new Date(t + 6 * DAY + 18 * HOUR),
-    signalClosesAt: new Date(t + 7 * DAY),
+    selectionClosesAt: new Date(t + 2 * DAY),
+    questionsCloseAt,
+    answersCloseAt: new Date(questionsCloseAt.getTime() + RESPONSE_CLOCK_HOURS * HOUR),
     nextDealAt: new Date(t + 7 * DAY + 7 * HOUR),
   };
   const n = now.getTime();
   let phase: WeekPhase;
   if (n < clock.dealAt.getTime()) phase = 'awaiting_deal';
-  else if (n < clock.stampsCloseAt.getTime()) phase = 'validation';
-  else if (n < clock.revealAt.getTime()) phase = 'sealed';
-  else if (n < clock.signalOpensAt.getTime()) phase = 'reveal';
-  else phase = 'signal';
+  else if (n < clock.selectionClosesAt.getTime()) phase = 'selection';
+  else if (n < clock.questionsCloseAt.getTime()) phase = 'exchange_questions';
+  else if (n < clock.answersCloseAt.getTime()) phase = 'exchange_answers';
+  else phase = 'bridge';
   return { ...clock, phase };
 }
 

@@ -59,7 +59,7 @@ export function makeCtx(now: Date = at(0, 9)): TestContext {
 export async function resetDb(): Promise<void> {
   await testPool().query(`
     TRUNCATE users, magic_link_tokens, postal_code_centroids, weekly_batches, freeze_tokens, batch_runs,
-             job_runs, escrow_vault, sunday_signals, scenario_responses, matches, partner_venues CASCADE`);
+             job_runs, escrow_vault, voice_exchanges, matches, partner_venues CASCADE`);
 }
 
 export interface MemberOptions {

@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { Notice } from './primitives';
 
-/** Up to three photos. They stay sealed until a mutual Sunday reveal or a match. */
+/** Up to three photos. They stay sealed until a voice exchange completes (the release). */
 export function PhotoUploader({ photos, onChange }: { photos: MeResponse['photos']; onChange: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);

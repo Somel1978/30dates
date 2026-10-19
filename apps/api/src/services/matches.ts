@@ -6,10 +6,12 @@ import {
   type ChatMessageDto,
   type MatchDetail,
   type MatchSummary,
+  type VenueDto,
 } from '@thirtydates/shared';
 import type { AppContext } from '../context.js';
 import { withSystemTx, type Tx } from '../db/pool.js';
 import { conflict, notFound } from '../lib/errors.js';
+import { bridgeWindowEnd } from './bridge.js';
 import { loadRevealedIdentities } from './profiles.js';
 
 export interface MatchRow {
@@ -19,9 +21,11 @@ export interface MatchRow {
   status: MatchSummary['status'];
   time_zone: string;
   created_at: Date;
+  /** Venue auto-assigned at release (null when none is within 3 km of the midpoint). */
+  venue_id: string | null;
 }
 
-const MATCH_COLUMNS = 'id, user_a_id, user_b_id, status, time_zone, created_at';
+const MATCH_COLUMNS = 'id, user_a_id, user_b_id, status, time_zone, created_at, venue_id';
 
 export async function lockMatchForParty(tx: Tx, matchId: string, userId: string): Promise<MatchRow> {
   const { rows } = await tx.query<MatchRow>(
@@ -156,8 +160,20 @@ export async function getMatch(ctx: AppContext, userId: string, matchId: string)
       state = aligned.rowCount ? 'no_venue_nearby' : 'awaiting_alignment';
     }
 
+    const venue = match.venue_id
+      ? (
+          await tx.query<VenueDto>(
+            `SELECT id, name, address, venue_type, ST_Y(geom) AS lat, ST_X(geom) AS lng FROM partner_venues WHERE id = $1`,
+            [match.venue_id],
+          )
+        ).rows[0] ?? null
+      : null;
+
     return {
       ...summary!,
+      suggested_venue: venue,
+      bridge_window_closes_at: bridgeWindowEnd(match.created_at).toISOString(),
+      server_now: ctx.now().toISOString(),
       bridge: {
         state,
         my_preference: pref.rows[0]

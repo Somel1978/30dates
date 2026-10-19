@@ -2,20 +2,19 @@ import { weekClock } from '@thirtydates/shared';
 import type { AppContext } from './context.js';
 import { runMondayBatch } from './matching/matching.js';
 import { runBridgeMaintenance } from './services/bridge.js';
-import { runSundayReveal } from './services/escrow.js';
-import { purgeClosedSignals } from './services/signals.js';
+import { runExchangeTick } from './services/exchange.js';
 import { conflict } from './lib/errors.js';
 
-export const JOB_NAMES = ['monday-deal', 'late-deal', 'sunday-reveal', 'signal-close', 'bridge-maintenance', 'aged-out-sweep'] as const;
+export const JOB_NAMES = ['monday-deal', 'late-deal', 'exchange-tick', 'bridge-maintenance', 'aged-out-sweep'] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 
 /** UTC cron schedule for each job (minute hour day-of-month month day-of-week). */
 export const JOB_SCHEDULE: Record<JobName, string> = {
   'monday-deal': '0 7 * * 1',
-  // Tops up late joiners and anyone short of six cards, hourly while stamps are open.
+  // Tops up late joiners and anyone short of six cards, hourly while selection is open.
   'late-deal': '20 * * * *',
-  'sunday-reveal': '0 6 * * 0',
-  'signal-close': '0 0 * * 1',
+  // Wednesday seal, Thursday Response Clock start and Friday expiry; each step is idempotent.
+  'exchange-tick': '* * * * *',
   'bridge-maintenance': '*/5 * * * *',
   'aged-out-sweep': '5 0 * * *',
 };
@@ -24,29 +23,26 @@ export function isJobName(name: string): name is JobName {
   return (JOB_NAMES as readonly string[]).includes(name);
 }
 
-/** Whether the job's boundary for the current week has passed (used for start-up catch-up). */
+/** Whether the job may run now (also used for start-up catch-up). */
 export function jobIsDue(name: JobName, now: Date): boolean {
-  const clock = weekClock(now);
   switch (name) {
     case 'monday-deal':
     case 'late-deal':
-      // Cards are only dealt while stamps are open, never after Saturday night.
-      return clock.phase === 'validation';
-    case 'sunday-reveal':
-      return clock.phase === 'reveal' || clock.phase === 'signal';
+      // Cards are only dealt while selection is open.
+      return weekClock(now).phase === 'selection';
     default:
       return true;
   }
 }
 
 /**
- * Every job is idempotent: re-running it for the same week changes nothing, so the scheduler,
- * start-up catch-up and the authenticated cron endpoint can all trigger them safely.
+ * Every job is idempotent, so the scheduler, start-up catch-up and the authenticated cron
+ * endpoint can all trigger them safely.
  */
 export async function runJob(ctx: AppContext, name: JobName): Promise<unknown> {
   const now = ctx.now();
   const clock = weekClock(now);
-  const runKey = name === 'bridge-maintenance' || name === 'late-deal' ? now.toISOString().slice(0, 16) : clock.batchWeek;
+  const runKey = name === 'monday-deal' || name === 'aged-out-sweep' ? clock.batchWeek : now.toISOString().slice(0, 16);
   if (!jobIsDue(name, now)) throw conflict('job_not_due', `${name} is not due yet for week ${clock.batchWeek}`);
 
   await ctx.db.query(
@@ -61,11 +57,8 @@ export async function runJob(ctx: AppContext, name: JobName): Promise<unknown> {
     case 'late-deal':
       result = await runMondayBatch(ctx.db, clock.batchWeek, ctx.config.MATCHING_TOP_K);
       break;
-    case 'sunday-reveal':
-      result = await runSundayReveal(ctx, clock.batchWeek);
-      break;
-    case 'signal-close':
-      result = { purged: await purgeClosedSignals(ctx) };
+    case 'exchange-tick':
+      result = await runExchangeTick(ctx);
       break;
     case 'bridge-maintenance':
       result = await runBridgeMaintenance(ctx);

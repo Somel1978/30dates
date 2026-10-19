@@ -6,7 +6,8 @@ import {
   ageWindow,
   buildPsychometricVector,
   cosineSimilarity,
-  pickScenarios,
+  VOICE_PROMPTS,
+  VOICE_PROMPT_BY_KEY,
   seeksGender,
   weekClock,
 } from './index.js';
@@ -73,13 +74,20 @@ describe('orientation', () => {
 });
 
 describe('week clock (UTC)', () => {
-  it('maps instants to phases', () => {
+  it('maps instants to the four-stage week', () => {
     expect(weekClock(new Date('2026-10-19T06:59:59Z')).phase).toBe('awaiting_deal');
-    expect(weekClock(new Date('2026-10-19T07:00:00Z')).phase).toBe('validation');
-    expect(weekClock(new Date('2026-10-24T23:59:59Z')).phase).toBe('validation');
-    expect(weekClock(new Date('2026-10-25T03:00:00Z')).phase).toBe('sealed');
-    expect(weekClock(new Date('2026-10-25T06:00:00Z')).phase).toBe('reveal');
-    expect(weekClock(new Date('2026-10-25T18:00:00Z')).phase).toBe('signal');
+    expect(weekClock(new Date('2026-10-19T07:00:00Z')).phase).toBe('selection');
+    expect(weekClock(new Date('2026-10-20T23:59:59Z')).phase).toBe('selection');
+    expect(weekClock(new Date('2026-10-21T00:00:00Z')).phase).toBe('exchange_questions');
+    expect(weekClock(new Date('2026-10-22T00:00:00Z')).phase).toBe('exchange_answers');
+    expect(weekClock(new Date('2026-10-23T11:59:59Z')).phase).toBe('exchange_answers');
+    expect(weekClock(new Date('2026-10-23T12:00:00Z')).phase).toBe('bridge');
+    expect(weekClock(new Date('2026-10-25T23:59:59Z')).phase).toBe('bridge');
+  });
+
+  it('gives the Response Clock exactly 36 hours', () => {
+    const c = weekClock(new Date('2026-10-21T10:00:00Z'));
+    expect(c.answersCloseAt.getTime() - c.questionsCloseAt.getTime()).toBe(36 * 3_600_000);
   });
 
   it('anchors every day of the week to the same Monday', () => {
@@ -90,11 +98,19 @@ describe('week clock (UTC)', () => {
   });
 });
 
-describe('scenario picker', () => {
-  it('returns two distinct, stable cards', () => {
-    const a = pickScenarios('ab'.repeat(32), '2026-10-19');
-    expect(a).toHaveLength(2);
-    expect(a[0]!.key).not.toBe(a[1]!.key);
-    expect(pickScenarios('ab'.repeat(32), '2026-10-19')).toEqual(a);
+describe('voice prompt bank', () => {
+  it('has unique keys and enough prompts for two picks of three', () => {
+    expect(VOICE_PROMPT_BY_KEY.size).toBe(VOICE_PROMPTS.length);
+    expect(VOICE_PROMPTS.length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe('life rhythm', () => {
+  it('names the three strongest traits, never both early riser and night owl', async () => {
+    const { lifeRhythm } = await import('./index.js');
+    const rhythm = lifeRhythm(['trail_running', 'specialty_coffee', 'live_music']);
+    expect(rhythm).toHaveLength(3);
+    expect(rhythm.includes('Early riser') && rhythm.includes('Night owl')).toBe(false);
+    expect(lifeRhythm(['trail_running', 'specialty_coffee', 'live_music'])).toEqual(rhythm);
   });
 });

@@ -76,3 +76,47 @@ export const INTEREST_BY_KEY: ReadonlyMap<string, InterestDefinition> = new Map(
 export function interestLabel(key: string): string {
   return INTEREST_BY_KEY.get(key)?.label ?? key;
 }
+
+/** Plain-language rhythm for each trait, shown on cards as the member's Life Rhythm. */
+export const TRAIT_RHYTHM: Record<Trait, string> = {
+  outdoors: 'Outdoors most weekends',
+  endurance: 'Keeps a training rhythm',
+  culinary: 'Cooks for pleasure',
+  visual_arts: 'Drawn to galleries',
+  music: 'Life has a soundtrack',
+  literature: 'Always mid-book',
+  learning: 'Perpetual learner',
+  hosting: 'Loves hosting',
+  homebody: 'Homebody at heart',
+  travel: 'Travels slowly',
+  making: 'Makes things by hand',
+  wellness: 'Protects their routines',
+  reflective: 'Reflective, unhurried',
+  civic: 'Shows up for community',
+  tech: 'Tinkers with tech',
+  strategy: 'Loves a good game',
+  animals: 'Animal person',
+  nature: 'Happiest outdoors in green',
+  early_rhythm: 'Early riser',
+  late_rhythm: 'Night owl',
+};
+
+/**
+ * Life Rhythm: the three strongest lifestyle traits implied by a member's interests, in plain
+ * language. Deterministic, and never derived from the structural gates.
+ */
+export function lifeRhythm(interestKeys: readonly string[]): string[] {
+  const weights = new Map<Trait, number>();
+  for (const key of interestKeys) {
+    const def = INTEREST_BY_KEY.get(key);
+    if (!def) continue;
+    for (const [trait, w] of Object.entries(def.traits) as [Trait, number][]) weights.set(trait, (weights.get(trait) ?? 0) + w);
+  }
+  // Someone is an early riser or a night owl, not both.
+  if ((weights.get('early_rhythm') ?? 0) >= (weights.get('late_rhythm') ?? 0)) weights.delete('late_rhythm');
+  else weights.delete('early_rhythm');
+  return [...weights.entries()]
+    .sort((a, b) => b[1] - a[1] || TRAITS.indexOf(a[0]) - TRAITS.indexOf(b[0]))
+    .slice(0, 3)
+    .map(([trait]) => TRAIT_RHYTHM[trait]);
+}

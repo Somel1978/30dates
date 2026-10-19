@@ -1,4 +1,4 @@
-import { BRIDGE_MODES, CARD_LINES, RESONANCE_STAMPS } from '@thirtydates/shared';
+import { BRIDGE_MODES, MAX_ANSWER_BYTES, MAX_PROMPTS_PER_PICK } from '@thirtydates/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { SESSION_COOKIE, parse } from './app.js';
@@ -10,11 +10,10 @@ import { freezeCard, getCurrentBatch, unfreezeCard } from './services/batches.js
 import { acceptRaincheck, requestRaincheck, setBridgePreference } from './services/bridge.js';
 import { recordEscrowAction } from './services/escrow.js';
 import { getMatch, listMatches, listMessages, sendMessage } from './services/matches.js';
-import { CLOCK_TARGETS, dealNow, devStatus, moveClock, requireDevTools, seedMembersAround, signalMe, stampMe } from './services/devTools.js';
+import { CLOCK_TARGETS, counterpartsAct, dealNow, devStatus, moveClock, requireDevTools, seedMembersAround, selectMe } from './services/devTools.js';
+import { getExchange, lockAnswers, pickPrompts, readAnswerAudio } from './services/exchange.js';
 import { completeOnboarding, getMe, getProfile, onboardingSchema, setPaused } from './services/onboarding.js';
 import { addPhoto, deletePhoto, readPhoto } from './services/photos.js';
-import { answerScenario, getScenarioExchange } from './services/scenarios.js';
-import { submitSignal } from './services/signals.js';
 
 const uuid = z.string().uuid().transform((s) => s.toLowerCase());
 const targetBody = z.object({ target_user_id: uuid });
@@ -120,21 +119,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(204).send();
   });
 
-  // Silent validation. The response never varies with the counterpart's state.
-  app.post('/escrow/validate', member, async (req, reply) => {
-    const body = parse(
-      z.object({
-        target_user_id: uuid,
-        resonance_stamp_type: z.enum(RESONANCE_STAMPS),
-        card_line: z.enum(CARD_LINES),
-      }),
-      req.body,
-    );
-    await recordEscrowAction(ctx, req.auth.userId, body.target_user_id, {
-      kind: 'validated',
-      stamp: body.resonance_stamp_type,
-      line: body.card_line,
-    });
+  // Stage 2: select a whole profile into blind escrow. The response never varies with the
+  // counterpart's state.
+  app.post('/escrow/select', member, async (req, reply) => {
+    const { target_user_id } = parse(targetBody, req.body);
+    await recordEscrowAction(ctx, req.auth.userId, target_user_id, { kind: 'validated' });
     return reply.status(202).send({ accepted: true });
   });
 
@@ -144,24 +133,45 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(202).send({ accepted: true });
   });
 
-  // Sunday 06:00 reveal; also triggered by the worker. Protected by the cron secret.
-  app.post('/escrow/reveal', cron, async () => runJob(ctx, 'sunday-reveal'));
-
-  app.post('/escrow/signal', member, async (req) => {
-    const { target_user_id } = parse(targetBody, req.body);
-    const { matchId } = await submitSignal(ctx, req.auth.userId, target_user_id);
-    return { accepted: true, match_id: matchId };
+  // ------------------------------------------------------------------ Stage 3: voice Q&A
+  app.get('/exchanges/:id', member, async (req) => {
+    const { id } = parse(idParams, req.params);
+    return getExchange(ctx, req.auth.userId, id);
   });
 
-  app.get('/scenarios/:id', member, async (req) => {
+  app.put('/exchanges/:id/questions', member, async (req) => {
     const { id } = parse(idParams, req.params);
-    return getScenarioExchange(ctx, req.auth.userId, id);
+    const { prompt_keys } = parse(
+      z.object({ prompt_keys: z.array(z.string().max(48)).min(1).max(MAX_PROMPTS_PER_PICK) }),
+      req.body,
+    );
+    return pickPrompts(ctx, req.auth.userId, id, prompt_keys);
   });
 
-  app.post('/scenarios/:id', member, async (req) => {
+  // Lock: one audio file per question, form field name = prompt key. Final.
+  app.post('/exchanges/:id/lock', member, async (req) => {
     const { id } = parse(idParams, req.params);
-    const body = parse(z.object({ scenario_key: z.string().max(48), stance_key: z.string().max(48) }), req.body);
-    return answerScenario(ctx, req.auth.userId, id, body.scenario_key, body.stance_key);
+    const files: { promptKey: string; data: Buffer }[] = [];
+    for await (const part of req.files({ limits: { files: MAX_PROMPTS_PER_PICK, fileSize: MAX_ANSWER_BYTES } })) {
+      const data = await part.toBuffer();
+      if (part.file.truncated) throw badRequest('invalid_audio', 'Each answer must be under 4 MB');
+      files.push({ promptKey: part.fieldname, data });
+    }
+    const { released } = await lockAnswers(ctx, req.auth.userId, id, files);
+    return { released, exchange: await getExchange(ctx, req.auth.userId, id) };
+  });
+
+  app.get('/exchanges/:id/audio/:answerer/:prompt', member, async (req, reply) => {
+    const params = parse(
+      z.object({ id: uuid, answerer: uuid, prompt: z.string().regex(/^[a-z_]{1,48}$/) }),
+      req.params,
+    );
+    const audio = await readAnswerAudio(ctx, req.auth.userId, params.id, params.answerer, params.prompt);
+    return reply
+      .header('content-type', audio.contentType)
+      .header('cache-control', 'private, no-store')
+      .header('x-content-type-options', 'nosniff')
+      .send(audio.data);
   });
 
   // ------------------------------------------------------------------ matches & bridge
@@ -213,7 +223,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ------------------------------------------------------------------ test tools (development only)
   if (ctx.config.NODE_ENV === 'development' && ctx.setNow) {
     const dev = { preHandler: [app.requireOnboarded, async () => void requireDevTools(ctx)] };
-    app.get('/dev/status', dev, async (req) => devStatus(ctx, req.auth.userId));
+    // Signed-in is enough for the status (the menu shows the link right after sign-in).
+    app.get('/dev/status', { preHandler: [app.authenticate, async () => void requireDevTools(ctx)] }, async (req) =>
+      devStatus(ctx, req.auth.userId),
+    );
     app.post('/dev/seed', dev, async (req) => {
       const { count } = parse(z.object({ count: z.number().int().min(1).max(60).optional() }), req.body ?? {});
       await seedMembersAround(ctx, req.auth.userId, count ?? 24);
@@ -223,13 +236,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       await dealNow(ctx);
       return devStatus(ctx, req.auth.userId);
     });
-    app.post('/dev/stamp-me', dev, async (req) => {
+    app.post('/dev/select-me', dev, async (req) => {
       const { count } = parse(z.object({ count: z.number().int().min(1).max(6).optional() }), req.body ?? {});
-      await stampMe(ctx, req.auth.userId, count ?? 3);
+      await selectMe(ctx, req.auth.userId, count ?? 3);
       return devStatus(ctx, req.auth.userId);
     });
-    app.post('/dev/signal-me', dev, async (req) => {
-      await signalMe(ctx, req.auth.userId);
+    app.post('/dev/counterparts-act', dev, async (req) => {
+      await counterpartsAct(ctx, req.auth.userId);
       return devStatus(ctx, req.auth.userId);
     });
     app.post('/dev/clock', dev, async (req) => {

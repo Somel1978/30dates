@@ -1,31 +1,23 @@
 import {
-  MAX_WEEKLY_VALIDATIONS,
-  SCENARIOS_PER_EXCHANGE,
+  MAX_WEEKLY_SELECTIONS,
   weekClock,
   type BatchCard,
-  type CardLine,
   type CurrentBatchResponse,
-  type MutualCard,
-  type ResonanceStamp,
 } from '@thirtydates/shared';
 import type { AppContext } from '../context.js';
 import { withSystemTx, withUserTx } from '../db/pool.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { orderedPair, pairHash } from '../lib/crypto.js';
-import { countWeeklyValidations, lockActorBatch } from './escrow.js';
-import { loadCardProfiles, loadRevealedIdentities } from './profiles.js';
+import { lockActorBatch } from './escrow.js';
+import { listWeekExchanges } from './exchange.js';
+import { loadCardProfiles } from './profiles.js';
 
 interface StakeRow {
   counterpart_id: string;
-  pair_hash: Buffer;
   my_action: 'validated' | 'passed';
-  my_stamp: ResonanceStamp | null;
-  my_stamp_line: CardLine | null;
-  status: 'locked' | 'mutual_unlocked';
-  revealed_at: Date | null;
 }
 
-/** GET /api/batches/current — the user's own view of the week, read under row-level security. */
+/** GET /api/batches/current — the member's own view of the week, read under row-level security. */
 export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<CurrentBatchResponse> {
   const now = ctx.now();
   const clock = weekClock(now);
@@ -44,18 +36,15 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
     const batch = clock.phase === 'awaiting_deal' ? undefined : batchRes.rows[0];
     const cardIds = batch?.card_user_ids ?? [];
 
+    // Own-side projection only: the counterpart's choice is never readable here.
     const stakes = (
       await tx.query<StakeRow>(
-        `SELECT counterpart_id, pair_hash, my_action, my_stamp, my_stamp_line, status, revealed_at
-           FROM escrow_my_stakes WHERE batch_week = $1`,
+        'SELECT counterpart_id, my_action FROM escrow_my_stakes WHERE batch_week = $1',
         [week],
       )
     ).rows;
     const stakeByCounterpart = new Map(stakes.map((s) => [s.counterpart_id, s]));
-
-    const mutualVisible = now >= clock.scenarioUnlockAt;
-    const mutualStakes = mutualVisible ? stakes.filter((s) => s.status === 'mutual_unlocked') : [];
-    const profiles = await loadCardProfiles(tx, userId, [...new Set([...cardIds, ...mutualStakes.map((s) => s.counterpart_id)])]);
+    const profiles = await loadCardProfiles(tx, userId, cardIds);
 
     const cards: BatchCard[] = cardIds.flatMap((id) => {
       const profile = profiles.get(id);
@@ -67,39 +56,6 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
           carried_over: batch?.carried_over_user_id === id,
           frozen: batch?.frozen_user_id === id,
           my_action: stake?.my_action ?? null,
-          my_stamp: stake?.my_stamp ?? null,
-          my_stamp_line: stake?.my_stamp_line ?? null,
-        },
-      ];
-    });
-
-    const revealedIds = mutualStakes.filter((s) => s.revealed_at !== null).map((s) => s.counterpart_id);
-    const identities = await loadRevealedIdentities(tx, revealedIds);
-
-    const scenarioCounts = new Map<string, { mine: number; theirs: number }>();
-    if (mutualStakes.length > 0) {
-      const { rows } = await tx.query<{ pair_hash: Buffer; mine: number; total: number }>(
-        `SELECT pair_hash, count(*) FILTER (WHERE user_id = $2)::int AS mine, count(*)::int AS total
-           FROM scenario_responses WHERE batch_week = $1 AND pair_hash = ANY ($3::bytea[])
-          GROUP BY pair_hash`,
-        [week, userId, mutualStakes.map((s) => s.pair_hash)],
-      );
-      for (const r of rows) scenarioCounts.set(r.pair_hash.toString('hex'), { mine: r.mine, theirs: r.total - r.mine });
-    }
-
-    const mutual: MutualCard[] = mutualStakes.flatMap((s) => {
-      const profile = profiles.get(s.counterpart_id);
-      if (!profile) return [];
-      const counts = scenarioCounts.get(s.pair_hash.toString('hex')) ?? { mine: 0, theirs: 0 };
-      return [
-        {
-          ...profile,
-          scenario_exchange: {
-            unlocked: true,
-            answered_by_me: counts.mine,
-            comparison_ready: counts.mine >= SCENARIOS_PER_EXCHANGE && counts.theirs >= SCENARIOS_PER_EXCHANGE,
-          },
-          revealed: identities.get(s.counterpart_id) ?? null,
         },
       ];
     });
@@ -108,26 +64,11 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
       'SELECT used_for FROM freeze_tokens WHERE user_id = $1 AND token_week = $2',
       [userId, week],
     );
-    const stampsUsed = await tx.query<{ n: number }>(
+    const selected = await tx.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM escrow_my_stakes
         WHERE my_action = 'validated' AND my_acted_at >= $1 AND my_acted_at < $1 + interval '7 days'`,
       [clock.weekStart],
     );
-
-    const signal = await tx.query<{ target_id: string }>(
-      'SELECT target_id FROM sunday_signals WHERE batch_week = $1',
-      [week],
-    );
-    let mySignal: CurrentBatchResponse['my_signal'] = null;
-    if (signal.rows[0]) {
-      const targetId = signal.rows[0].target_id;
-      const [lo, hi] = orderedPair(userId, targetId);
-      const match = await tx.query<{ id: string }>(
-        'SELECT id FROM matches WHERE user_a_id = $1 AND user_b_id = $2',
-        [lo, hi],
-      );
-      mySignal = { target_user_id: targetId, match_id: match.rows[0]?.id ?? null };
-    }
 
     return {
       batch_week: week,
@@ -135,22 +76,19 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
       server_now: now.toISOString(),
       clock: {
         deal_at: clock.dealAt.toISOString(),
-        scenario_unlock_at: clock.scenarioUnlockAt.toISOString(),
-        stamps_close_at: clock.stampsCloseAt.toISOString(),
-        reveal_at: clock.revealAt.toISOString(),
-        signal_opens_at: clock.signalOpensAt.toISOString(),
-        signal_closes_at: clock.signalClosesAt.toISOString(),
+        selection_closes_at: clock.selectionClosesAt.toISOString(),
+        questions_close_at: clock.questionsCloseAt.toISOString(),
+        answers_close_at: clock.answersCloseAt.toISOString(),
         next_deal_at: clock.nextDealAt.toISOString(),
       },
       cards,
-      stamps_remaining: Math.max(0, MAX_WEEKLY_VALIDATIONS - stampsUsed.rows[0]!.n),
+      selections_remaining: Math.max(0, MAX_WEEKLY_SELECTIONS - selected.rows[0]!.n),
       freeze: {
         token_available: token.rows.length === 0,
         used_for: token.rows[0]?.used_for ?? null,
         frozen_user_id: batch?.frozen_user_id ?? null,
       },
-      mutual,
-      my_signal: mySignal,
+      exchanges: await listWeekExchanges(tx, userId, week),
     };
   });
 }
@@ -158,7 +96,7 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
 /** Spend this week's Freeze Token to carry one undecided card into next Monday's batch. */
 export async function freezeCard(ctx: AppContext, userId: string, targetId: string): Promise<void> {
   const clock = weekClock(ctx.now());
-  if (clock.phase !== 'validation') throw conflict('validation_window_closed', 'Cards can only be frozen during the week');
+  if (clock.phase !== 'selection') throw conflict('selection_closed', 'Cards can only be frozen while selection is open');
 
   await withSystemTx(ctx.db, async (tx) => {
     const batch = await tx.query<{ card_user_ids: string[]; carried_over_user_id: string | null; frozen_user_id: string | null }>(
@@ -194,10 +132,10 @@ export async function freezeCard(ctx: AppContext, userId: string, targetId: stri
   });
 }
 
-/** Return a frozen card to the table and refund the Freeze Token (validation window only). */
+/** Return a frozen card to the table and refund the Freeze Token (selection window only). */
 export async function unfreezeCard(ctx: AppContext, userId: string): Promise<void> {
   const clock = weekClock(ctx.now());
-  if (clock.phase !== 'validation') throw conflict('validation_window_closed', 'The freeze can only be changed during the week');
+  if (clock.phase !== 'selection') throw conflict('selection_closed', 'The freeze can only be changed while selection is open');
 
   await withSystemTx(ctx.db, async (tx) => {
     const batch = await lockActorBatch(tx, userId, clock.batchWeek);

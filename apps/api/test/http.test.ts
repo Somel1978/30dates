@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { VOICE_PROMPTS } from '@thirtydates/shared';
+import { toneWav } from '../src/services/devTools.js';
+import { recordEscrowAction } from '../src/services/escrow.js';
+import { pickPrompts, runExchangeTick } from '../src/services/exchange.js';
 import { at, createMember, dealPair, makeCtx, resetDb } from './helpers.js';
 
 const ctx = makeCtx();
@@ -78,7 +82,7 @@ describe('magic-link auth & onboarding', () => {
 
     const batch = await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie } });
     expect(batch.statusCode).toBe(200);
-    expect(batch.json()).toMatchObject({ phase: 'validation', cards: [], stamps_remaining: 3 });
+    expect(batch.json()).toMatchObject({ phase: 'selection', cards: [], selections_remaining: 3, exchanges: [] });
   });
 
   it('rejects reused or bogus links and does not reveal whether an email exists', async () => {
@@ -159,10 +163,12 @@ describe('request hardening', () => {
   });
 
   it('protects cron endpoints with the shared secret and refuses jobs that are not due', async () => {
-    expect((await app.inject({ method: 'POST', url: '/api/escrow/reveal' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/cron/exchange-tick' })).statusCode).toBe(401);
     const secret = { 'x-cron-secret': ctx.config.CRON_SECRET };
-    const early = await app.inject({ method: 'POST', url: '/api/escrow/reveal', headers: secret });
+    ctx.setNow(at(2, 9)); // Wednesday: selection closed, so no dealing
+    const early = await app.inject({ method: 'POST', url: '/api/cron/monday-deal', headers: secret });
     expect(early.statusCode).toBe(409);
+    ctx.setNow(at(0, 9));
     const deal = await app.inject({ method: 'POST', url: '/api/cron/monday-deal', headers: secret });
     expect(deal.statusCode).toBe(200);
     expect(deal.json().status).toBe('completed');
@@ -179,15 +185,15 @@ describe('escrow endpoints', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/escrow/validate',
+      url: '/api/escrow/select',
       headers: { cookie, ...ORIGIN },
-      payload: { target_user_id: other, resonance_stamp_type: 'rhythm_agree', card_line: 'interest_1' },
+      payload: { target_user_id: other },
     });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ accepted: true });
 
     const batch = (await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie } })).json();
-    expect(batch.cards[0]).toMatchObject({ user_id: other, my_action: 'validated', my_stamp: 'rhythm_agree' });
+    expect(batch.cards[0]).toMatchObject({ user_id: other, my_action: 'validated' });
     expect(batch.cards[0]).not.toHaveProperty('first_name');
     expect(JSON.stringify(batch)).not.toContain('photo');
   });
@@ -197,12 +203,51 @@ describe('escrow endpoints', () => {
     await app.inject({ method: 'POST', url: '/api/onboarding', headers: { cookie, ...ORIGIN }, payload: onboardingPayload });
     const res = await app.inject({
       method: 'POST',
-      url: '/api/escrow/validate',
+      url: '/api/escrow/select',
       headers: { cookie, ...ORIGIN },
-      payload: { target_user_id: 'nope', resonance_stamp_type: 'heart' },
+      payload: { target_user_id: 'nope' },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('invalid_request');
+  });
+});
+
+describe('voice exchange over HTTP', () => {
+  it('locks one recording per question in a single multipart request', async () => {
+    const cookieA = await signIn('voice-a@example.test');
+    await app.inject({ method: 'POST', url: '/api/onboarding', headers: { cookie: cookieA, ...ORIGIN }, payload: onboardingPayload });
+    const a = (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: cookieA } })).json().id as string;
+    const b = await createMember(ctx, { lat: 38.71, lng: -9.14, gender: 'man', seeks: 'women' });
+    await dealPair(ctx, a, b);
+    await app.inject({ method: 'POST', url: '/api/escrow/select', headers: { cookie: cookieA, ...ORIGIN }, payload: { target_user_id: b } });
+    await recordEscrowAction(ctx, b, a, { kind: 'validated' });
+    ctx.setNow(at(2, 1));
+    await runExchangeTick(ctx);
+    const exchangeId = (await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie: cookieA } })).json()
+      .exchanges[0].id as string;
+    await pickPrompts(ctx, b, exchangeId, VOICE_PROMPTS.slice(0, 3).map((p) => p.key));
+    ctx.setNow(at(3, 1));
+    await runExchangeTick(ctx);
+
+    const boundary = '----voice';
+    const body = Buffer.concat([
+      ...VOICE_PROMPTS.slice(0, 3).flatMap((p) => [
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${p.key}"; filename="${p.key}.wav"\r\nContent-Type: audio/wav\r\n\r\n`),
+        toneWav(),
+        Buffer.from('\r\n'),
+      ]),
+      Buffer.from(`--${boundary}--\r\n`),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/exchanges/${exchangeId}/lock`,
+      headers: { cookie: cookieA, 'content-type': `multipart/form-data; boundary=${boundary}`, ...ORIGIN },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().released).toBe(false);
+    expect(res.json().exchange.i_locked).toBe(true);
+    expect(res.json().exchange.my_answers).toHaveLength(3);
   });
 });
 

@@ -1,49 +1,36 @@
 'use client';
 
-import {
-  AUDIO_LOUNGE_LOCAL_HOUR,
-  BRIDGE_HORIZON_DAYS,
-  BRIDGE_MODES,
-  BRIDGE_MODE_META,
-  addLocalDays,
-  localParts,
-  zonedTimeToUtc,
-  type BridgeMode,
-  type MatchDetail,
-} from '@thirtydates/shared';
+import { addLocalDays, localParts, zonedTimeToUtc, type MatchDetail } from '@thirtydates/shared';
 import { useMemo, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import { haptic } from '@/lib/format';
+import { formatDateTime, haptic } from '@/lib/format';
 import { Button, Notice, Panel, cx } from './primitives';
 
-const COFFEE_TIMES: [number, number][] = [
+const LOCAL_TIMES: [number, number][] = [
   [9, 0],
   [12, 30],
   [16, 0],
   [18, 30],
 ];
-const MAX_SLOTS = 21;
+const LEAD_MS = 3 * 3_600_000;
 
 interface DaySlots {
   label: string;
-  slots: { iso: string; label: string }[];
+  slots: { iso: string; label: string; evening: boolean }[];
 }
 
-/** Candidate slots in the match's zone, mirroring the server-side slot rules. */
-function candidateSlots(mode: BridgeMode, timeZone: string, now: Date): DaySlots[] {
-  const leadMs = (mode === 'audio_lounge' ? 2 : 12) * 3_600_000;
+/** Candidate slots in the match's zone between now (+3 h notice) and the end of the 72-hour window. */
+function candidateSlots(timeZone: string, now: Date, windowEnd: Date): DaySlots[] {
   const today = localParts(now, timeZone);
   const days: DaySlots[] = [];
-  for (let d = 0; d < BRIDGE_HORIZON_DAYS; d++) {
+  for (let d = 0; d < 4; d++) {
     const day = addLocalDays(today, d);
-    const times: [number, number][] = mode === 'audio_lounge' ? [[AUDIO_LOUNGE_LOCAL_HOUR, 0]] : COFFEE_TIMES;
-    const slots = times
-      .map(([hour, minute]) => zonedTimeToUtc({ ...day, hour, minute }, timeZone))
-      .filter((s) => s.getTime() > now.getTime() + leadMs)
-      .filter((s) => mode !== 'audio_lounge' || localParts(s, timeZone).isoWeekday <= 5)
-      .map((s) => ({
-        iso: s.toISOString(),
-        label: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone }).format(s),
+    const slots = LOCAL_TIMES.map(([hour, minute]) => ({ at: zonedTimeToUtc({ ...day, hour, minute }, timeZone), hour }))
+      .filter(({ at }) => at.getTime() >= now.getTime() + LEAD_MS && at.getTime() <= windowEnd.getTime())
+      .map(({ at, hour }) => ({
+        iso: at.toISOString(),
+        label: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone }).format(at),
+        evening: hour >= 17,
       }));
     if (slots.length === 0) continue;
     const noon = zonedTimeToUtc({ ...day, hour: 12, minute: 0 }, timeZone);
@@ -56,27 +43,28 @@ function candidateSlots(mode: BridgeMode, timeZone: string, now: Date): DaySlots
 }
 
 /**
- * The First-Meet Bridge toggle. Each person privately picks a path and the windows they can do;
- * nobody "asks out" — the event locks itself the moment both choices are compatible.
+ * The First-Meet Bridge: a 45-minute coffee or wine audit at a curated venue near the midpoint,
+ * within 72 hours of the release. Each person privately marks the windows they can do; nobody
+ * "asks out", and the meeting locks itself at the earliest shared slot.
  */
 export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdated: (next: MatchDetail) => void }) {
   const mine = match.bridge.my_preference;
-  const [mode, setMode] = useState<BridgeMode>(mine?.mode ?? 'audio_lounge');
   const [selected, setSelected] = useState<Set<string>>(() => new Set(mine?.slots ?? []));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const days = useMemo(() => candidateSlots(mode, match.time_zone, new Date()), [mode, match.time_zone]);
-
-  const switchMode = (next: BridgeMode) => {
-    setMode(next);
-    setSelected(new Set(mine?.mode === next ? mine.slots : []));
-  };
+  const windowEnd = useMemo(() => new Date(match.bridge_window_closes_at), [match.bridge_window_closes_at]);
+  // The server clock decides what's bookable; a wrong device clock must not offer past slots.
+  const days = useMemo(
+    () => candidateSlots(match.time_zone, new Date(match.server_now), windowEnd),
+    [match.time_zone, match.server_now, windowEnd],
+  );
+  const venue = match.suggested_venue;
 
   const toggle = (iso: string) =>
     setSelected((s) => {
       const next = new Set(s);
       if (next.has(iso)) next.delete(iso);
-      else if (next.size < MAX_SLOTS) next.add(iso);
+      else next.add(iso);
       return next;
     });
 
@@ -84,7 +72,10 @@ export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdate
     setBusy(true);
     setError(undefined);
     try {
-      const next = await api<MatchDetail>(`/matches/${match.id}/bridge`, { method: 'PUT', body: { mode, slots: [...selected] } });
+      const next = await api<MatchDetail>(`/matches/${match.id}/bridge`, {
+        method: 'PUT',
+        body: { mode: 'coffee_audit', slots: [...selected] },
+      });
       haptic(10);
       onUpdated(next);
     } catch (err) {
@@ -97,30 +88,30 @@ export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdate
   return (
     <Panel className="p-6">
       <p className="eyebrow">First-Meet Bridge</p>
-      <h2 className="mt-1 text-2xl">How would you like to meet?</h2>
-      <p className="mt-1 text-sm text-muted">Your choice is private. When you both pick the same path and a shared window, it locks automatically.</p>
-
-      <div role="radiogroup" aria-label="Meeting path" className="mt-5 grid gap-3 sm:grid-cols-2">
-        {BRIDGE_MODES.map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={mode === m}
-            onClick={() => switchMode(m)}
-            className={cx(
-              'min-h-touch rounded-2xl border p-4 text-left transition-colors',
-              mode === m ? 'border-brass bg-brass/10' : 'border-line hover:border-muted',
-            )}
+      <h2 className="mt-1 text-2xl">45 minutes, coffee or wine</h2>
+      {venue ? (
+        <p className="mt-2 text-muted">
+          <span className="text-ink">{venue.name}</span> · {venue.address}{' '}
+          <a
+            className="text-brass underline-offset-4 hover:underline"
+            href={`https://www.openstreetmap.org/?mlat=${venue.lat}&mlon=${venue.lng}#map=17/${venue.lat}/${venue.lng}`}
+            target="_blank"
+            rel="noreferrer"
           >
-            <p className="font-serif text-xl">{BRIDGE_MODE_META[m].title}</p>
-            <p className="text-sm text-muted">{BRIDGE_MODE_META[m].detail}</p>
-          </button>
-        ))}
-      </div>
+            Map
+          </a>
+          <br />
+          <span className="text-sm">Chosen for you near your midpoint. Evening slots move to a wine bar when one is close.</span>
+        </p>
+      ) : (
+        <p className="mt-2 text-muted">We’ll place you at a curated venue near your midpoint.</p>
+      )}
+      <p className="mt-2 text-sm text-muted">
+        Mark every window you could do before {formatDateTime(match.bridge_window_closes_at)}. It’s private: when you share one, it locks automatically.
+      </p>
 
-      <div className="mt-6 space-y-4">
-        <p className="eyebrow">Windows you can do · {selected.size} selected</p>
+      <div className="mt-5 space-y-4">
+        {days.length === 0 && <Notice>There are no bookable windows left before the bridge closes.</Notice>}
         {days.map((day) => (
           <div key={day.label} className="flex flex-wrap items-center gap-2">
             <span className="w-28 text-sm text-muted">{day.label}</span>
@@ -136,6 +127,7 @@ export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdate
                 )}
               >
                 {slot.label}
+                {slot.evening && <span className="ml-1 text-xs text-muted">· wine</span>}
               </button>
             ))}
           </div>
@@ -144,12 +136,10 @@ export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdate
 
       <div className="mt-6 flex flex-col items-start gap-3">
         <Button onClick={save} busy={busy} disabled={selected.size === 0}>
-          {mine ? 'Update my preference' : 'Seal my preference'}
+          {mine ? 'Update my windows' : 'Seal my windows'}
         </Button>
-        {match.bridge.state === 'no_venue_nearby' && (
-          <Notice tone="error">No partner venue covers your midpoint yet. The audio lounge is always available.</Notice>
-        )}
-        {mine && match.bridge.state === 'awaiting_alignment' && <Notice>Sealed. Waiting for a compatible choice — nothing is sent to them.</Notice>}
+        {match.bridge.state === 'no_venue_nearby' && <Notice tone="error">No partner venue covers your midpoint yet.</Notice>}
+        {mine && match.bridge.state === 'awaiting_alignment' && <Notice>Sealed. Waiting for a shared window; nothing is sent to them.</Notice>}
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Panel>

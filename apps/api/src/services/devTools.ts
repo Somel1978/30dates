@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   INTEREST_CATALOG,
-  RESONANCE_STAMPS,
+  VOICE_PROMPTS,
   ageOn,
   ageWindow,
   isoDate,
@@ -17,13 +17,14 @@ import { HttpError, conflict } from '../lib/errors.js';
 import { runJob } from '../jobs.js';
 import { runMondayBatch } from '../matching/matching.js';
 import { recordEscrowAction } from './escrow.js';
+import { lockAnswers, pickPrompts } from './exchange.js';
 import { completeOnboarding, onboardingSchema } from './onboarding.js';
-import { submitSignal } from './signals.js';
 
 /**
- * Development-only test tools. Lets one person walk the whole weekly ritual in minutes:
- * seed compatible members, deal, have cards stamp you back, move the clock through the week
- * and have mutual pairs signal you. Routes are registered only when NODE_ENV=development.
+ * Development-only test tools. Lets one person walk the whole weekly ritual in minutes: seed
+ * compatible members, deal, have cards select you, move the clock through the week, and have
+ * mutual pairs pick questions and lock (generated) voice answers. Routes are registered only
+ * when NODE_ENV=development.
  */
 
 const FIRST_NAMES = ['Maya', 'Tom', 'Sasha', 'Inês', 'Daniel', 'Priya', 'Luca', 'Aoife', 'Kwame', 'Elena', 'Rui', 'Hannah', 'Omar', 'Clara', 'Jonas', 'Leila'];
@@ -134,71 +135,94 @@ export async function seedMembersAround(ctx: AppContext, userId: string, count: 
 
 export async function dealNow(ctx: AppContext) {
   const clock = weekClock(ctx.now());
-  if (clock.phase !== 'validation') {
-    throw conflict('not_dealing', 'Cards are dealt Monday 07:00 to Saturday night. Jump the clock to Monday or Wednesday first.');
+  if (clock.phase !== 'selection') {
+    throw conflict('not_dealing', 'Cards are dealt Monday 07:00 to Tuesday night. Jump the clock to Monday first.');
   }
   return runMondayBatch(ctx.db, clock.batchWeek, ctx.config.MATCHING_TOP_K);
 }
 
-/** Has up to `count` of my current cards silently validate me (respecting their own 3-stamp limit). */
-export async function stampMe(ctx: AppContext, userId: string, count: number): Promise<number> {
+/** Has up to `count` of my current cards silently select me (respecting their own limit of 3). */
+export async function selectMe(ctx: AppContext, userId: string, count: number): Promise<number> {
   const clock = weekClock(ctx.now());
-  if (clock.phase !== 'validation') throw conflict('validation_window_closed', 'Jump the clock to Monday or Wednesday first');
+  if (clock.phase !== 'selection') throw conflict('selection_closed', 'Jump the clock to Monday first');
   const cards = await ctx.db.query<{ card_user_ids: string[] }>(
     'SELECT card_user_ids FROM weekly_batches WHERE user_id = $1 AND batch_week = $2',
     [userId, clock.batchWeek],
   );
-  let stamped = 0;
-  for (const [i, other] of (cards.rows[0]?.card_user_ids ?? []).entries()) {
-    if (stamped >= count) break;
+  let selected = 0;
+  for (const other of cards.rows[0]?.card_user_ids ?? []) {
+    if (selected >= count) break;
     try {
-      await recordEscrowAction(ctx, other, userId, {
-        kind: 'validated',
-        stamp: RESONANCE_STAMPS[i % RESONANCE_STAMPS.length]!,
-        line: (['flaw', 'interest_1', 'upside', 'badges'] as const)[i % 4]!,
-      });
-      stamped++;
+      await recordEscrowAction(ctx, other, userId, { kind: 'validated' });
+      selected++;
     } catch (err) {
-      // Already decided on me, out of stamps, or frozen me: skip to the next card.
+      // Already decided on me, out of selections, or froze me: try the next card.
       if (!(err instanceof HttpError)) throw err;
     }
   }
-  return stamped;
+  return selected;
 }
 
-/** Has every revealed mutual pair send me their #1 Signal. */
-export async function signalMe(ctx: AppContext, userId: string): Promise<number> {
+/** A one-second 440 Hz tone as a WAV file, standing in for a recorded voice answer. */
+export function toneWav(seconds = 1, sampleRate = 8000): Buffer {
+  const samples = Math.round(seconds * sampleRate);
+  const buf = Buffer.alloc(44 + samples * 2);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + samples * 2, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i++) {
+    const fade = Math.min(1, i / 400, (samples - i) / 400);
+    buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 9000 * fade), 44 + i * 2);
+  }
+  return buf;
+}
+
+/**
+ * Plays the other side of each of my exchanges this week: while questions are open they pick
+ * two prompts for me; once the Response Clock runs they lock generated answers to my questions.
+ */
+export async function counterpartsAct(ctx: AppContext, userId: string): Promise<{ picked: number; locked: number }> {
   const clock = weekClock(ctx.now());
-  if (clock.phase !== 'signal') throw conflict('signal_window_closed', 'Jump the clock to Sunday 18:00 first');
-  const mutual = await withSystemTx(ctx.db, async (tx) =>
-    (
-      await tx.query<{ other: string }>(
-        `SELECT CASE WHEN user_a_id = $1 THEN user_b_id ELSE user_a_id END AS other
-           FROM escrow_vault
-          WHERE batch_week = $2 AND status = 'mutual_unlocked' AND revealed_at IS NOT NULL
-            AND (user_a_id = $1 OR user_b_id = $1)`,
-        [userId, clock.batchWeek],
-      )
-    ).rows,
+  const { rows } = await ctx.db.query<{ id: string; status: string; other: string; other_locked: boolean }>(
+    `SELECT id, status, CASE WHEN user_a_id = $1 THEN user_b_id ELSE user_a_id END AS other,
+            CASE WHEN user_a_id = $1 THEN user_b_locked_at IS NOT NULL ELSE user_a_locked_at IS NOT NULL END AS other_locked
+       FROM voice_exchanges WHERE batch_week = $2 AND (user_a_id = $1 OR user_b_id = $1)`,
+    [userId, clock.batchWeek],
   );
-  let sent = 0;
-  for (const { other } of mutual) {
-    try {
-      await submitSignal(ctx, other, userId);
-      sent++;
-    } catch (err) {
-      if (!(err instanceof HttpError)) throw err;
+  let picked = 0;
+  let locked = 0;
+  for (const x of rows) {
+    if (x.status === 'questions') {
+      await pickPrompts(ctx, x.other, x.id, VOICE_PROMPTS.slice(0, 2).map((p) => p.key));
+      picked++;
+    } else if (x.status === 'answering' && !x.other_locked) {
+      const mine = await ctx.db.query<{ prompt_key: string }>(
+        'SELECT prompt_key FROM voice_prompt_picks WHERE exchange_id = $1 AND picker_id = $2',
+        [x.id, userId],
+      );
+      await lockAnswers(ctx, x.other, x.id, mine.rows.map((r) => ({ promptKey: r.prompt_key, data: toneWav() })));
+      locked++;
     }
   }
-  return sent;
+  return { picked, locked };
 }
 
-export const CLOCK_TARGETS = ['real', 'monday', 'wednesday', 'sealed', 'reveal', 'signal', 'next_monday'] as const;
+export const CLOCK_TARGETS = ['real', 'monday', 'wednesday', 'thursday', 'friday', 'next_monday'] as const;
 export type ClockTarget = (typeof CLOCK_TARGETS)[number];
 
 /**
  * Moves the API's clock to a point in the current (possibly already shifted) week and runs the
- * jobs that would have fired on the way: the reveal for Sunday, the deal for next Monday.
+ * jobs that would have fired on the way.
  */
 export async function moveClock(ctx: AppContext, target: ClockTarget): Promise<void> {
   const setNow = requireDevTools(ctx);
@@ -211,17 +235,13 @@ export async function moveClock(ctx: AppContext, target: ClockTarget): Promise<v
   const targets: Record<Exclude<ClockTarget, 'real'>, Date> = {
     monday: at(0, 9),
     wednesday: at(2, 9),
-    sealed: at(6, 3),
-    reveal: at(6, 6, 5),
-    signal: at(6, 18, 5),
+    thursday: at(3, 9),
+    friday: at(4, 12, 5),
     next_monday: at(7, 7, 5),
   };
   setNow(targets[target]);
-  if (target === 'reveal' || target === 'signal') await runJob(ctx, 'sunday-reveal');
-  if (target === 'next_monday') {
-    await runJob(ctx, 'signal-close');
-    await runJob(ctx, 'monday-deal');
-  }
+  await runJob(ctx, 'exchange-tick');
+  if (target === 'next_monday') await runJob(ctx, 'monday-deal');
 }
 
 export async function devStatus(ctx: AppContext, userId: string): Promise<DevStatus> {
@@ -233,9 +253,8 @@ export async function devStatus(ctx: AppContext, userId: string): Promise<DevSta
          (SELECT count(*)::int FROM users WHERE onboarding_completed_at IS NOT NULL AND is_active) AS members,
          coalesce((SELECT cardinality(card_user_ids) FROM weekly_batches WHERE user_id = $1 AND batch_week = $2), 0) AS my_cards,
          (SELECT count(*)::int FROM escrow_vault WHERE batch_week = $2 AND status <> 'wiped'
-             AND ((user_a_id = $1 AND user_b_action = 'validated') OR (user_b_id = $1 AND user_a_action = 'validated'))) AS stamped_me,
-         (SELECT count(*)::int FROM escrow_vault WHERE batch_week = $2 AND status = 'mutual_unlocked'
-             AND (user_a_id = $1 OR user_b_id = $1)) AS mutual,
+             AND ((user_a_id = $1 AND user_b_action = 'validated') OR (user_b_id = $1 AND user_a_action = 'validated'))) AS selected_me,
+         (SELECT count(*)::int FROM voice_exchanges WHERE batch_week = $2 AND (user_a_id = $1 OR user_b_id = $1)) AS exchanges,
          (SELECT count(*)::int FROM matches WHERE user_a_id = $1 OR user_b_id = $1) AS matches`,
       [userId, clock.batchWeek],
     );

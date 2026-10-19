@@ -4,6 +4,7 @@ import type { AppContext } from '../context.js';
 import { withSystemTx } from '../db/pool.js';
 import { notFound } from '../lib/errors.js';
 import { orderedPair } from '../lib/crypto.js';
+import { removeVoiceFiles, voiceKeysForUser } from './exchange.js';
 
 /**
  * Block someone you have been dealt or matched with. Removes them from all future batches and
@@ -48,14 +49,15 @@ export async function deleteAccount(ctx: AppContext, userId: string): Promise<vo
       `UPDATE escrow_vault SET
          status = 'wiped', wiped_at = $2, mutual_at = NULL, revealed_at = NULL,
          user_a_id = NULL, user_b_id = NULL, user_a_action = NULL, user_b_action = NULL,
-         user_a_stamp = NULL, user_b_stamp = NULL, user_a_stamp_line = NULL, user_b_stamp_line = NULL,
          user_a_acted_at = NULL, user_b_acted_at = NULL
        WHERE user_a_id = $1 OR user_b_id = $1`,
       [userId, now],
     );
     const photos = await tx.query<{ storage_key: string }>('SELECT storage_key FROM user_photos WHERE user_id = $1', [userId]);
+    const voice = await voiceKeysForUser(tx, userId);
     await tx.query('DELETE FROM users WHERE id = $1', [userId]);
-    return photos.rows.map((r) => r.storage_key);
+    return { photos: photos.rows.map((r) => r.storage_key), voice };
   });
-  await Promise.all(keys.map((k) => unlink(path.join(path.resolve(ctx.config.UPLOAD_DIR), k)).catch(() => undefined)));
+  await Promise.all(keys.photos.map((k) => unlink(path.join(path.resolve(ctx.config.UPLOAD_DIR), k)).catch(() => undefined)));
+  await removeVoiceFiles(ctx, keys.voice);
 }

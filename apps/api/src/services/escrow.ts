@@ -1,31 +1,30 @@
-import { MAX_WEEKLY_VALIDATIONS, addDays, weekClock, type CardLine, type ResonanceStamp } from '@thirtydates/shared';
+import { MAX_WEEKLY_SELECTIONS, addDays, weekClock } from '@thirtydates/shared';
 import type { AppContext } from '../context.js';
 import { withSystemTx, type Tx } from '../db/pool.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { orderedPair, pairHash } from '../lib/crypto.js';
 
 /**
- * Simultaneous blind escrow state machine.
+ * Simultaneous blind escrow state machine (Stage 2: blind whole-profile selection).
  *
- *   (no row) ──first action──▶ locked ──second validation──▶ mutual_unlocked ──Sun 06:00──▶ revealed
- *                                 │
- *                                 └──Sun 06:00, not mutual──▶ wiped (all identifying columns scrubbed)
+ *   (no row) ──first selection──▶ locked ──second selection──▶ mutual_unlocked ──Wed 00:00──▶ voice exchange
+ *                                   │                                                    └─both lock──▶ revealed
+ *                                   └──Wed 00:00, not mutual──▶ wiped (all identifying columns scrubbed)
  *
  * Invariants:
  *  - The target is never notified. Responses to the actor are identical whatever the
  *    counterpart did, and the counterpart can only read a stake after acting on it themselves
  *    (RLS policy `escrow_party_read`), so an unreciprocated validation is invisible.
- *  - A pass never mutates the counterpart's stake mid-week: wiping happens only in the Sunday
- *    job. An immediate wipe would change the validator's own view and leak the pass.
- *  - Actions are final for the week; at most three validations per user per UTC week.
+ *  - A pass never mutates the counterpart's stake mid-week: wiping happens only when selection
+ *    closes. An immediate wipe would change the selector's own view and leak the pass.
+ *  - Actions are final for the week; at most three whole-profile selections per user per UTC week.
  *  - A card frozen by a party who has not acted is carried into next week: its stake moves to
  *    the next batch week instead of being wiped. Carries are one-sided (only the freezer sees
  *    the card again), so the counterpart never learns they were frozen.
  */
 
-export type EscrowAction =
-  | { kind: 'validated'; stamp: ResonanceStamp; line: CardLine }
-  | { kind: 'passed' };
+/** 'validated' = the member selected this whole profile into blind escrow. */
+export type EscrowAction = { kind: 'validated' } | { kind: 'passed' };
 
 interface BatchRow {
   card_user_ids: string[];
@@ -62,8 +61,8 @@ export async function recordEscrowAction(
 ): Promise<void> {
   const now = ctx.now();
   const clock = weekClock(now);
-  if (clock.phase !== 'validation') {
-    throw conflict('validation_window_closed', 'Resonance stamps open Monday 07:00 and close Saturday midnight (UTC)');
+  if (clock.phase !== 'selection') {
+    throw conflict('selection_closed', 'Selection opens Monday 07:00 and closes Tuesday midnight (UTC)');
   }
   if (actorId === targetId) throw notFound('card_not_in_batch', 'That card is not in your batch');
 
@@ -74,8 +73,8 @@ export async function recordEscrowAction(
 
     if (action.kind === 'validated') {
       const used = await countWeeklyValidations(tx, actorId, clock.weekStart);
-      if (used >= MAX_WEEKLY_VALIDATIONS) {
-        throw conflict('stamp_limit_reached', `You can stamp up to ${MAX_WEEKLY_VALIDATIONS} cards a week`);
+      if (used >= MAX_WEEKLY_SELECTIONS) {
+        throw conflict('selection_limit_reached', `You can select up to ${MAX_WEEKLY_SELECTIONS} profiles a week`);
       }
     }
 
@@ -109,66 +108,48 @@ export async function recordEscrowAction(
     await tx.query(
       `UPDATE escrow_vault SET
          user_${side}_action = $2::escrow_action,
-         user_${side}_stamp = $3::resonance_stamp,
-         user_${side}_stamp_line = $4::card_line,
-         user_${side}_acted_at = CASE WHEN $2 = 'validated' THEN $5::timestamptz END,
-         status = CASE WHEN $6 THEN 'mutual_unlocked'::escrow_status ELSE status END,
-         mutual_at = CASE WHEN $6 THEN $5::timestamptz ELSE mutual_at END
+         user_${side}_acted_at = CASE WHEN $2 = 'validated' THEN $3::timestamptz END,
+         status = CASE WHEN $4 THEN 'mutual_unlocked'::escrow_status ELSE status END,
+         mutual_at = CASE WHEN $4 THEN $3::timestamptz ELSE mutual_at END
        WHERE id = $1`,
-      [
-        stake.id,
-        action.kind,
-        action.kind === 'validated' ? action.stamp : null,
-        action.kind === 'validated' ? action.line : null,
-        now,
-        becomesMutual,
-      ],
+      [stake.id, action.kind, now, becomesMutual],
     );
   });
 }
 
-export interface RevealSummary {
+export interface SealSummary {
   batchWeek: string;
-  revealed: number;
+  mutual: number;
   carried: number;
   wiped: number;
 }
 
 /**
- * Sunday 06:00 UTC. Unblurs first names and photos for mutual stakes, carries frozen undecided
- * stakes into next week, and silently wipes everything else.
+ * Wednesday 00:00 UTC, when selection closes: frozen undecided stakes move to next week, every
+ * other unreciprocated stake is silently wiped, and mutual stakes stay for the voice exchange.
+ * Idempotent: once sealed, a week has no locked stakes left to process.
  */
-export async function runSundayReveal(ctx: AppContext, batchWeek: string): Promise<RevealSummary> {
-  const now = ctx.now();
-  return withSystemTx(ctx.db, async (tx) => {
-    const revealed = await tx.query(
-      `UPDATE escrow_vault SET revealed_at = $2
-        WHERE batch_week = $1 AND status = 'mutual_unlocked' AND revealed_at IS NULL`,
-      [batchWeek, now],
-    );
-    const carried = await tx.query(
-      `UPDATE escrow_vault e SET batch_week = $2
-         FROM weekly_batches wb
-        WHERE e.batch_week = $1 AND e.status = 'locked'
-          AND wb.batch_week = $1 AND wb.frozen_user_id IS NOT NULL
-          AND (   (wb.user_id = e.user_a_id AND wb.frozen_user_id = e.user_b_id AND e.user_a_action = 'pending')
-               OR (wb.user_id = e.user_b_id AND wb.frozen_user_id = e.user_a_id AND e.user_b_action = 'pending'))`,
-      [batchWeek, addDays(batchWeek, 7)],
-    );
-    const wiped = await tx.query(
-      `UPDATE escrow_vault SET
-         status = 'wiped', wiped_at = $2,
-         user_a_id = NULL, user_b_id = NULL, user_a_action = NULL, user_b_action = NULL,
-         user_a_stamp = NULL, user_b_stamp = NULL, user_a_stamp_line = NULL, user_b_stamp_line = NULL,
-         user_a_acted_at = NULL, user_b_acted_at = NULL
-       WHERE batch_week = $1 AND status = 'locked'`,
-      [batchWeek, now],
-    );
-    return {
-      batchWeek,
-      revealed: revealed.rowCount ?? 0,
-      carried: carried.rowCount ?? 0,
-      wiped: wiped.rowCount ?? 0,
-    };
-  });
+export async function sealEscrowWeek(tx: Tx, batchWeek: string, now: Date): Promise<SealSummary> {
+  const carried = await tx.query(
+    `UPDATE escrow_vault e SET batch_week = $2
+       FROM weekly_batches wb
+      WHERE e.batch_week = $1 AND e.status = 'locked'
+        AND wb.batch_week = $1 AND wb.frozen_user_id IS NOT NULL
+        AND (   (wb.user_id = e.user_a_id AND wb.frozen_user_id = e.user_b_id AND e.user_a_action = 'pending')
+             OR (wb.user_id = e.user_b_id AND wb.frozen_user_id = e.user_a_id AND e.user_b_action = 'pending'))`,
+    [batchWeek, addDays(batchWeek, 7)],
+  );
+  const wiped = await tx.query(
+    `UPDATE escrow_vault SET
+       status = 'wiped', wiped_at = $2,
+       user_a_id = NULL, user_b_id = NULL, user_a_action = NULL, user_b_action = NULL,
+       user_a_acted_at = NULL, user_b_acted_at = NULL
+     WHERE batch_week = $1 AND status = 'locked'`,
+    [batchWeek, now],
+  );
+  const mutual = await tx.query(
+    `SELECT 1 FROM escrow_vault WHERE batch_week = $1 AND status = 'mutual_unlocked'`,
+    [batchWeek],
+  );
+  return { batchWeek, mutual: mutual.rowCount ?? 0, carried: carried.rowCount ?? 0, wiped: wiped.rowCount ?? 0 };
 }

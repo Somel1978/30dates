@@ -1,8 +1,6 @@
 import {
-  AUDIO_LOUNGE_LOCAL_HOUR,
-  BRIDGE_HORIZON_DAYS,
   BRIDGE_MODE_META,
-  BRIDGING_TIMEOUT_DAYS,
+  BRIDGE_WINDOW_HOURS,
   COFFEE_FIRST_LOCAL_HOUR,
   COFFEE_LAST_LOCAL_HOUR,
   RAINCHECK_ACCEPT_WINDOW_HOURS,
@@ -22,25 +20,21 @@ import { conflict, forbidden, unprocessable } from '../lib/errors.js';
 import { lockMatchForParty, type MatchRow } from './matches.js';
 
 const HOUR = 3_600_000;
-const AUDIO_LEAD_HOURS = 2;
-const COFFEE_LEAD_HOURS = 12;
+/** Minimum notice for a coffee or wine slot. */
+export const BRIDGE_LEAD_HOURS = 3;
 
-function leadHours(mode: BridgeMode): number {
-  return mode === 'audio_lounge' ? AUDIO_LEAD_HOURS : COFFEE_LEAD_HOURS;
+/** End of the 72-hour First-Meet window that opens at the release. */
+export function bridgeWindowEnd(matchCreatedAt: Date): Date {
+  return new Date(matchCreatedAt.getTime() + BRIDGE_WINDOW_HOURS * HOUR);
 }
 
 /** Slot rules in the match's local zone; returns a reason when invalid. */
-export function slotProblem(mode: BridgeMode, slot: Date, timeZone: string, now: Date): string | null {
+export function slotProblem(slot: Date, timeZone: string, now: Date, windowEnd: Date): string | null {
   if (Number.isNaN(slot.getTime())) return 'not a valid timestamp';
-  if (slot.getTime() < now.getTime() + leadHours(mode) * HOUR) return `must be at least ${leadHours(mode)}h ahead`;
-  if (slot.getTime() > now.getTime() + BRIDGE_HORIZON_DAYS * 24 * HOUR) return `must be within ${BRIDGE_HORIZON_DAYS} days`;
+  if (slot.getTime() < now.getTime() + BRIDGE_LEAD_HOURS * HOUR) return `must be at least ${BRIDGE_LEAD_HOURS}h ahead`;
+  if (slot.getTime() > windowEnd.getTime()) return `must be within ${BRIDGE_WINDOW_HOURS} hours of your release`;
   const p = localParts(slot, timeZone);
   if (p.second !== 0) return 'must start on the minute';
-  if (mode === 'audio_lounge') {
-    if (p.isoWeekday > 5) return 'audio lounges run on weekday evenings';
-    if (p.hour !== AUDIO_LOUNGE_LOCAL_HOUR || p.minute !== 0) return `audio lounges start at ${AUDIO_LOUNGE_LOCAL_HOUR}:00`;
-    return null;
-  }
   if (p.minute !== 0 && p.minute !== 30) return 'coffee slots start on the hour or half hour';
   const minutes = p.hour * 60 + p.minute;
   if (minutes < COFFEE_FIRST_LOCAL_HOUR * 60 || minutes > COFFEE_LAST_LOCAL_HOUR * 60) {
@@ -79,8 +73,9 @@ export interface BridgeOutcome {
 }
 
 /**
- * Store a member's private transition preference; lock the event the moment both members
- * hold the same mode and share at least one slot (earliest common slot wins).
+ * Store a member's private time windows; lock the 45-minute coffee or wine audit the moment both
+ * share a slot (earliest wins). The venue is the one auto-assigned at release, or the best
+ * venue for the slot's time of day (wine bar from 17:00) if that suits better.
  */
 export async function setBridgePreference(
   ctx: AppContext,
@@ -96,7 +91,7 @@ export async function setBridgePreference(
 
     const slots = [...new Set(rawSlots.map((s) => new Date(s).getTime()))].sort((a, b) => a - b).map((t) => new Date(t));
     for (const slot of slots) {
-      const problem = slotProblem(mode, slot, match.time_zone, now);
+      const problem = slotProblem(slot, match.time_zone, now, bridgeWindowEnd(match.created_at));
       if (problem) throw unprocessable('invalid_slot', `Slot ${slot.toISOString()} ${problem}`, { slot: rawSlots });
     }
     if (slots.length === 0) throw unprocessable('invalid_slot', 'Pick at least one time window');
@@ -114,17 +109,15 @@ export async function setBridgePreference(
     const theirs = other.rows[0];
     if (!theirs || theirs.mode !== mode) return { state: 'awaiting_alignment' };
 
-    const earliest = now.getTime() + leadHours(mode) * HOUR;
+    const earliest = now.getTime() + BRIDGE_LEAD_HOURS * HOUR;
     const theirTimes = new Set(theirs.slots.map((d) => d.getTime()));
     const common = slots.filter((s) => theirTimes.has(s.getTime()) && s.getTime() >= earliest);
     const start = common[0];
     if (!start) return { state: 'awaiting_alignment' };
 
-    let venueId: string | null = null;
-    if (mode === 'coffee_audit') {
-      venueId = await pickVenue(tx, match.user_a_id, match.user_b_id, preferredVenueType(start, match.time_zone));
-      if (!venueId) return { state: 'no_venue_nearby' };
-    }
+    const venueId =
+      (await pickVenue(tx, match.user_a_id, match.user_b_id, preferredVenueType(start, match.time_zone))) ?? match.venue_id;
+    if (!venueId) return { state: 'no_venue_nearby' };
     await tx.query(
       `INSERT INTO bridge_events (match_id, mode, starts_at, duration_minutes, venue_id)
        VALUES ($1, $2, $3, $4, $5)`,
@@ -135,11 +128,8 @@ export async function setBridgePreference(
   });
 }
 
-/**
- * Raincheck target: the same local wall-clock time two or three days later (48–72 h). Audio
- * lounges prefer a weekday inside that window and fall back to the 48 h day.
- */
-export function raincheckStart(mode: BridgeMode, startsAt: Date, timeZone: string): Date {
+/** Raincheck target: the same local wall-clock time two days later (the 48–72 h shift). */
+export function raincheckStart(startsAt: Date, timeZone: string): Date {
   const p = localParts(startsAt, timeZone);
   const candidates = [2, 3].map((days) => {
     const day = addLocalDays(p, days);
@@ -150,10 +140,6 @@ export function raincheckStart(mode: BridgeMode, startsAt: Date, timeZone: strin
     // ±1 h tolerance absorbs a DST transition inside the window.
     return shift >= RAINCHECK_MIN_SHIFT_HOURS - 1 && shift <= RAINCHECK_MAX_SHIFT_HOURS + 1;
   });
-  if (mode === 'audio_lounge') {
-    const weekday = inWindow.find((c) => localParts(c, timeZone).isoWeekday <= 5);
-    if (weekday) return weekday;
-  }
   return inWindow[0] ?? new Date(startsAt.getTime() + RAINCHECK_MIN_SHIFT_HOURS * HOUR);
 }
 
@@ -193,14 +179,12 @@ export async function requestRaincheck(ctx: AppContext, userId: string, matchId:
     );
     if (token.rowCount === 0) throw conflict('freeze_token_spent', 'Your Freeze Token for this week is already used');
 
-    const proposed = raincheckStart(event.mode, event.starts_at, match.time_zone);
+    const proposed = raincheckStart(event.starts_at, match.time_zone);
     let venueId = event.venue_id;
-    if (event.mode === 'coffee_audit') {
-      const active = await tx.query('SELECT 1 FROM partner_venues WHERE id = $1 AND is_active', [venueId]);
-      if (!active.rowCount) {
-        venueId = await pickVenue(tx, match.user_a_id, match.user_b_id, preferredVenueType(proposed, match.time_zone));
-        if (!venueId) throw conflict('no_venue_nearby', 'No partner venue is available near your midpoint');
-      }
+    const active = await tx.query('SELECT 1 FROM partner_venues WHERE id = $1 AND is_active', [venueId]);
+    if (!active.rowCount) {
+      venueId = await pickVenue(tx, match.user_a_id, match.user_b_id, preferredVenueType(proposed, match.time_zone));
+      if (!venueId) throw conflict('no_venue_nearby', 'No partner venue is available near your midpoint');
     }
     await tx.query(
       `UPDATE bridge_events SET
@@ -270,10 +254,11 @@ export async function runBridgeMaintenance(ctx: AppContext): Promise<BridgeMaint
         completed.rows.map((r) => r.match_id),
       ]);
     }
+    // No shared slot inside the 72-hour window: the match closes kindly.
     const timedOut = await tx.query(
       `UPDATE matches SET status = 'expired', expired_at = $1, expired_reason = 'bridge_not_aligned'
-        WHERE status = 'bridging' AND created_at <= $1::timestamptz - make_interval(days => $2)`,
-      [now, BRIDGING_TIMEOUT_DAYS],
+        WHERE status = 'bridging' AND created_at <= $1::timestamptz - make_interval(hours => $2)`,
+      [now, BRIDGE_WINDOW_HOURS],
     );
     return {
       rainchecksExpired: expired.rowCount ?? 0,

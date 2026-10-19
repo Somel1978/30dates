@@ -183,7 +183,7 @@ export function ProfileForm({
 
       <Panel className="space-y-5 p-6">
         <h2 className="text-2xl">You</h2>
-        <Field label="First name" htmlFor="first_name" hint="Only shown after a mutual Sunday reveal.">
+        <Field label="First name" htmlFor="first_name" hint="Only revealed when a voice exchange completes.">
           <input id="first_name" className={inputClass} autoComplete="given-name" maxLength={40} value={draft.first_name ?? ''} onChange={(e) => set('first_name', e.target.value)} />
         </Field>
         <Field label="Birth date" htmlFor="birth_date" hint={`Members are ${PLATFORM_MIN_AGE} to ${PLATFORM_MAX_AGE}.`}>
@@ -239,7 +239,10 @@ export function ProfileForm({
       </Panel>
 
       <Panel className="space-y-6 p-6">
-        <h2 className="text-2xl">Life architecture</h2>
+        <div>
+          <h2 className="text-2xl">Life architecture</h2>
+          <p className="mt-1 text-sm text-muted">Never shown on your card. We use it quietly so everyone you meet already fits how you want to live.</p>
+        </div>
         <Segmented legend={GATE_QUESTIONS.family_goal} options={FAMILY_GOALS} labels={GATE_LABELS.family_goal} value={draft.gates.family_goal} onChange={(v) => setGate('family_goal', v)} />
         <Segmented legend={GATE_QUESTIONS.living_architecture} options={LIVING_ARCHITECTURES} labels={GATE_LABELS.living_architecture} value={draft.gates.living_architecture} onChange={(v) => setGate('living_architecture', v)} />
         <Segmented legend={GATE_QUESTIONS.mobility} options={MOBILITY_PROFILES} labels={GATE_LABELS.mobility} value={draft.gates.mobility} onChange={(v) => setGate('mobility', v)} />
