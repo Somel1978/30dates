@@ -11,6 +11,7 @@ import {
   VECTOR_VERSION,
   ageOn,
   buildPsychometricVector,
+  isValidTimeZone,
   toPgVector,
   type MeResponse,
 } from '@thirtydates/shared';
@@ -18,7 +19,6 @@ import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { withUserTx } from '../db/pool.js';
 import { notFound, unprocessable } from '../lib/errors.js';
-import { isValidTimeZone } from '../lib/tz.js';
 
 /** ~100 m precision (3 decimal places of a degree). */
 export function roundCoordinate(value: number): number {

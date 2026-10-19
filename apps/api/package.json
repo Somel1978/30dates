@@ -14,7 +14,8 @@
     "migrate": "tsx src/db/migrate.ts",
     "import:postal-codes": "tsx src/scripts/importPostalCodes.ts",
     "import:venues": "tsx src/scripts/importVenues.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:demo": "tsx src/scripts/seedDemo.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.1",

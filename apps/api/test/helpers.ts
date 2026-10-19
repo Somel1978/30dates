@@ -42,6 +42,7 @@ export function makeCtx(now: Date = at(0, 9)): TestContext {
       MAIL_FROM: 'test@thirtydates.local',
       UPLOAD_DIR: '/tmp/thirtydates-test-uploads',
       MATCHING_TOP_K: 24,
+      CLOCK_OVERRIDE: undefined,
     },
     mailer: { send: async (m) => void sent.push(m) },
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },

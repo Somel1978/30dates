@@ -12,6 +12,8 @@ const schema = z.object({
   MAIL_FROM: z.string().default('Thirty Dates <hello@thirtydates.local>'),
   UPLOAD_DIR: z.string().default('./uploads'),
   MATCHING_TOP_K: z.coerce.number().int().min(6).max(200).default(24),
+  /** Development only: start the service clock at this ISO instant (it keeps ticking). */
+  CLOCK_OVERRIDE: z.string().datetime({ offset: true }).optional(),
 });
 
 export type AppConfig = z.infer<typeof schema>;
@@ -21,6 +23,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid configuration: ${issues}`);
+  }
+  if (parsed.data.NODE_ENV !== 'development' && parsed.data.CLOCK_OVERRIDE) {
+    throw new Error('Invalid configuration: CLOCK_OVERRIDE is only allowed in development');
   }
   if (parsed.data.NODE_ENV === 'production' && !parsed.data.SMTP_URL) {
     throw new Error('Invalid configuration: SMTP_URL is required in production');

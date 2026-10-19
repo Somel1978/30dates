@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Semantic colour tokens (RGB triplets). Light editorial mode is bone paper with ink;
+   dark mode is the default deep-charcoal lounge. */
+:root {
+  --color-canvas: 248 247 244; /* #F8F7F4 bone */
+  --color-panel: 255 255 255;
+  --color-raised: 240 237 231;
+  --color-ink: 27 30 36;
+  --color-muted: 98 102 110;
+  --color-line: 221 216 207;
+  --color-accent: 169 87 62; /* terracotta deep: AA contrast on bone */
+  --color-brass: 138 112 34;
+  color-scheme: light;
+}
+
+.dark {
+  --color-canvas: 15 17 21; /* #0F1115 */
+  --color-panel: 18 22 31; /* #12161F */
+  --color-raised: 26 31 42;
+  --color-ink: 236 232 224;
+  --color-muted: 156 160 168;
+  --color-line: 42 48 60;
+  --color-accent: 200 109 81; /* #C86D51 */
+  --color-brass: 212 175 55; /* #D4AF37 */
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-canvas font-sans text-base text-ink antialiased;
+    min-height: 100dvh;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-serif font-medium tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-brass ring-offset-2 ring-offset-canvas;
+  }
+  ::selection {
+    @apply bg-accent/30;
+  }
+}
+
+@layer components {
+  /* Every interactive element meets the 48px touch target. */
+  .tap {
+    @apply inline-flex min-h-touch min-w-touch items-center justify-center;
+  }
+  .eyebrow {
+    @apply font-sans text-xs uppercase tracking-eyebrow text-muted;
+  }
+  .hairline {
+    @apply border-line/70;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

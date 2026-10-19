@@ -11,14 +11,21 @@ export function consoleLogger(name: string): Logger {
   return { info: write('info'), warn: write('warn'), error: write('error') };
 }
 
+function clock(override: string | undefined): () => Date {
+  if (!override) return () => new Date();
+  const offset = Date.parse(override) - Date.now();
+  return () => new Date(Date.now() + offset);
+}
+
 export function createContext(name: string): AppContext {
   const config = loadConfig();
   const log = consoleLogger(name);
+  if (config.CLOCK_OVERRIDE) log.warn({ clock: config.CLOCK_OVERRIDE }, 'service clock overridden (development)');
   return {
     config,
     db: createPool(config.DATABASE_URL),
     mailer: createMailer(config.SMTP_URL, config.MAIL_FROM, log),
     log,
-    now: () => new Date(),
+    now: clock(config.CLOCK_OVERRIDE),
   };
 }
