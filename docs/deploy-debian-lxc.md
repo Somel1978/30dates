@@ -368,6 +368,7 @@ Jobs are safe to repeat; a job that isn't due yet answers `409 job_not_due`.
 | `DATABASE_URL` shows `thirtydates_app:@` (empty password) | Set a fresh one in both places: `P=$(openssl rand -hex 24); sed -i -E "s|thirtydates_app:[^@]*@|thirtydates_app:$P@|" ~/30dates/.env; sudo -u postgres psql -c "ALTER ROLE thirtydates_app PASSWORD '$P';"` |
 | `No existing cluster is suitable as a default target` / `You must install at least one postgresql-client-<version> package` | PostgreSQL never installed. Usually the Debian 12 commands were run on Debian 13: check `VERSION_CODENAME` and use the matching block in step 2. |
 | `type "vector" does not exist` | The pgvector package for your PostgreSQL version is missing: redo step 2 for your Debian release. |
+| Build fails with `<Html> should not be imported outside of pages/_document` | An older checkout built the web app with `NODE_ENV=development` from `.env`. Run `git pull`: the web build now always runs in production mode. |
 | `npm run build` killed / "JavaScript heap out of memory" | Give the container 4 GB RAM or add swap in Proxmox. |
 | No cards on the dashboard | Cards are dealt Mondays at 07:00 UTC. Check `journalctl -u thirtydates-worker`, or run the job by hand (above). |
 | A service fails with "Failed to set up mount namespacing" | Enable *Options → Features → nesting* for the container in Proxmox. |
