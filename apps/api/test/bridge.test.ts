@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { toneWav } from '../src/services/devTools.js';
 import { acceptRaincheck, raincheckStart, requestRaincheck, runBridgeMaintenance, setBridgePreference } from '../src/services/bridge.js';
-import { recordEscrowAction } from '../src/services/escrow.js';
+import { selectProfile } from '../src/services/escrow.js';
 import { getExchange, lockAnswers, runExchangeTick } from '../src/services/exchange.js';
 import { getMatch } from '../src/services/matches.js';
 import { at, createMember, dealPair, makeCtx, resetDb } from './helpers.js';
@@ -22,8 +22,8 @@ async function releasedPair(coords?: { a: [number, number]; b: [number, number] 
   const b = await createMember(ctx, coords ? { lat: coords.b[0], lng: coords.b[1] } : {});
   ctx.setNow(at(0, 9));
   await dealPair(ctx, a, b);
-  await recordEscrowAction(ctx, a, b, { kind: 'validated' });
-  await recordEscrowAction(ctx, b, a, { kind: 'validated' });
+  await selectProfile(ctx, a, b);
+  await selectProfile(ctx, b, a);
   ctx.setNow(at(2, 0, 1));
   await runExchangeTick(ctx);
   ctx.setNow(at(3, 0, 1));

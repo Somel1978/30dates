@@ -8,11 +8,11 @@ import { blockUser, deleteAccount } from './services/account.js';
 import { consumeMagicLink, requestMagicLink, revokeSessions } from './services/auth.js';
 import { freezeCard, getCurrentBatch, unfreezeCard } from './services/batches.js';
 import { acceptRaincheck, requestRaincheck, setBridgePreference } from './services/bridge.js';
-import { recordEscrowAction } from './services/escrow.js';
+import { selectProfile } from './services/escrow.js';
 import { getMatch, listMatches, listMessages, sendMessage } from './services/matches.js';
 import { CLOCK_TARGETS, counterpartsAct, dealNow, devStatus, moveClock, requireDevTools, seedMembersAround, selectMe } from './services/devTools.js';
 import { getExchange, lockAnswers, pickPrompts, readAnswerAudio } from './services/exchange.js';
-import { completeOnboarding, getMe, getProfile, onboardingSchema, setPaused } from './services/onboarding.js';
+import { completeOnboarding, getMe, getProfile, onboardingSchema } from './services/onboarding.js';
 import { addPhoto, deletePhoto, readPhoto } from './services/photos.js';
 
 const uuid = z.string().uuid().transform((s) => s.toLowerCase());
@@ -64,12 +64,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/me/profile', member, async (req) => getProfile(ctx, req.auth.userId));
 
-  app.post('/me/pause', member, async (req) => {
-    const { paused } = parse(z.object({ paused: z.boolean() }), req.body);
-    await setPaused(ctx, req.auth.userId, paused);
-    return getProfile(ctx, req.auth.userId);
-  });
-
   app.post('/onboarding', authed, async (req) => {
     await completeOnboarding(ctx, req.auth.userId, parse(onboardingSchema, req.body));
     return getMe(ctx, req.auth.userId);
@@ -119,17 +113,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(204).send();
   });
 
-  // Stage 2: select a whole profile into blind escrow. The response never varies with the
-  // counterpart's state.
+  // Stage 2: choose a whole profile into blind escrow. The response never varies with the
+  // counterpart's state. There is deliberately no "pass": unchosen cards simply lapse.
   app.post('/escrow/select', member, async (req, reply) => {
     const { target_user_id } = parse(targetBody, req.body);
-    await recordEscrowAction(ctx, req.auth.userId, target_user_id, { kind: 'validated' });
-    return reply.status(202).send({ accepted: true });
-  });
-
-  app.post('/escrow/pass', member, async (req, reply) => {
-    const { target_user_id } = parse(targetBody, req.body);
-    await recordEscrowAction(ctx, req.auth.userId, target_user_id, { kind: 'passed' });
+    await selectProfile(ctx, req.auth.userId, target_user_id);
     return reply.status(202).send({ accepted: true });
   });
 

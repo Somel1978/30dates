@@ -1,50 +1,77 @@
 'use client';
 
 import type { CurrentBatchResponse } from '@thirtydates/shared';
-import { Countdown } from './Countdown';
 import { formatDayTime } from '@/lib/format';
 
-const HEADLINE: Record<CurrentBatchResponse['phase'], string> = {
-  awaiting_deal: 'The table is being set',
-  selection: 'Monday Deal Active',
-  exchange_questions: 'Voice exchange: choose your questions',
-  exchange_answers: 'Voice exchange: Response Clock running',
-  bridge: 'First-Meet Bridge',
-};
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return 'Good evening';
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
-/** Weekly countdown. Times render in the viewer's zone; the server clock is authoritative. */
-export function WeekBanner({ batch }: { batch: CurrentBatchResponse }) {
+/**
+ * The week, told as a short note rather than a status panel: what's happening now and the one
+ * thing (if any) worth doing. No ticking counters: deadlines are stated once, calmly.
+ */
+export function WeekBanner({ batch, firstName }: { batch: CurrentBatchResponse; firstName: string | null }) {
   const c = batch.clock;
-  const next: Record<CurrentBatchResponse['phase'], { label: string; at: string }> = {
-    awaiting_deal: { label: 'Six cards arrive', at: c.deal_at },
-    selection: { label: 'Selection closes', at: c.selection_closes_at },
-    exchange_questions: { label: 'Response Clock starts', at: c.questions_close_at },
-    exchange_answers: { label: 'Response Clock closes', at: c.answers_close_at },
-    bridge: { label: 'Next deal', at: c.next_deal_at },
-  };
-  const n = next[batch.phase];
+  const open = batch.exchanges.filter((x) => x.status === 'questions' || x.status === 'answering');
+  const left = batch.selections_remaining;
+  let note: React.ReactNode;
+
+  switch (batch.phase) {
+    case 'awaiting_deal':
+      note = <>Your table is being set. This week’s introductions arrive {formatDayTime(c.deal_at)}.</>;
+      break;
+    case 'selection':
+      note =
+        batch.cards.length === 0 ? null : (
+          <>
+            {batch.cards.length === 6 ? 'Six people' : `${batch.cards.length} ${batch.cards.length === 1 ? 'person' : 'people'}`} have been
+            introduced to you this week. No photos and no names yet, just how they live. Take your time, and choose up to three you’d
+            like to hear from by {formatDayTime(new Date(Date.parse(c.selection_closes_at) - 60_000).toISOString())}.{' '}
+            <span className="text-ink">
+              {left === 3 ? '' : left > 0 ? `You can choose ${left === 1 ? 'one more' : 'two more'}.` : 'You’ve chosen your three. There’s nothing else to do until Wednesday.'}
+            </span>
+          </>
+        );
+      break;
+    case 'exchange_questions':
+      note =
+        open.length > 0 ? (
+          <>
+            Someone you chose chose you too. Today, pick two or three questions you’d love to hear them answer. Their answers, and yours,
+            will be spoken, not typed.
+          </>
+        ) : (
+          <>Nothing became mutual this week. That’s part of the rhythm, and nobody was turned away. A fresh table is set on Monday.</>
+        );
+      break;
+    case 'exchange_answers':
+      note =
+        open.length > 0 ? (
+          <>Their questions are waiting for you. Answer in your own voice, in your own time, before {formatDayTime(c.answers_close_at)}.</>
+        ) : (
+          <>A quiet week. A fresh table is set {formatDayTime(c.next_deal_at)}.</>
+        );
+      break;
+    case 'bridge':
+      note = <>The week is winding down. A fresh table is set {formatDayTime(c.next_deal_at)}.</>;
+      break;
+  }
 
   return (
-    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p className="eyebrow">
-          Week of {new Date(`${batch.batch_week}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' })}
-        </p>
-        <h1 className="mt-1 text-4xl">{HEADLINE[batch.phase]}</h1>
-        <p className="mt-1 text-muted">
-          {n.label} {formatDayTime(n.at)} · in <Countdown to={n.at} serverNow={batch.server_now} />
-        </p>
-      </div>
-      {batch.phase === 'selection' && (
-        <div className="flex items-center gap-3" aria-label={`${batch.selections_remaining} of 3 selections left`}>
-          <span className="text-sm text-muted">Selections</span>
-          <span className="flex gap-1.5" aria-hidden="true">
-            {[0, 1, 2].map((i) => (
-              <span key={i} className={`h-3 w-3 rounded-full border ${i < batch.selections_remaining ? 'border-brass bg-brass' : 'border-line'}`} />
-            ))}
-          </span>
-        </div>
-      )}
-    </div>
+    <header className="mx-auto mb-12 max-w-2xl pt-6 text-center sm:pt-10">
+      <p className="font-serif text-lg italic text-brass">
+        Week of {new Date(`${batch.batch_week}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' })}
+      </p>
+      <h1 className="mt-3 text-4xl sm:text-5xl">
+        {greeting()}
+        {firstName ? `, ${firstName}` : ''}.
+      </h1>
+      {note && <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-ink/75">{note}</p>}
+    </header>
   );
 }

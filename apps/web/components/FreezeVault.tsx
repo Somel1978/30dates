@@ -2,11 +2,12 @@
 
 import type { BatchCard, CurrentBatchResponse } from '@thirtydates/shared';
 import type { Ref } from 'react';
-import { CardVault } from './primitives';
+import { cx } from './primitives';
 
 /**
- * The Freeze Vault drop zone, pinned to the bottom of the table during the week. Drag a card's
- * grip here (or tap the grip) to carry it into next Monday's batch with this week's token.
+ * The Freeze Vault, resting at the foot of the table all week: one place to keep a person you're
+ * not ready to decide on, so they come back next Monday. Drop a card's "Keep for next week"
+ * button here, or simply tap it.
  */
 export function FreezeVault({
   freeze,
@@ -25,41 +26,50 @@ export function FreezeVault({
   onUnfreeze: () => void;
   busy: boolean;
 }) {
-  let hint: string;
-  if (frozenCard) hint = 'Token spent on this card';
-  else if (freeze.used_for === 'raincheck') hint = 'Token spent on a raincheck this week';
-  else hint = dragging ? 'Release to freeze' : 'Drag a card’s grip here · 1 token';
+  let body: React.ReactNode;
+  if (frozenCard) {
+    body = (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-ink/80">
+          Keeping <span className="font-serif text-lg italic">{frozenCard.interests[0]?.label.toLowerCase()}</span>, about{' '}
+          {frozenCard.distance_km} km away, for next Monday.
+        </p>
+        <button type="button" onClick={onUnfreeze} disabled={busy} className="tap rounded-full px-4 text-sm text-muted hover:text-ink disabled:opacity-40">
+          Put back on the table
+        </button>
+      </div>
+    );
+  } else if (freeze.used_for === 'raincheck') {
+    body = <p className="text-muted">This week’s Freeze went on a raincheck for a first meeting.</p>;
+  } else {
+    body = (
+      <p className={cx(dragging ? 'text-brass' : 'text-muted')}>
+        {dragging ? 'Let go here to keep them for next week.' : 'Keep one person for next Monday.'}
+      </p>
+    );
+  }
 
   return (
-    <div className="sticky bottom-3 z-30 mt-8">
-      <CardVault
-        vaultRef={vaultRef}
-        label="Freeze Vault"
-        hint={hint}
-        highlight={dragging && over}
-        className={`py-3 backdrop-blur-md ${dragging ? 'ring-1 ring-brass/40' : ''}`}
-      >
-        {!dragging && !frozenCard ? null : frozenCard ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-serif text-lg">{frozenCard.interests[0]?.label ?? 'Frozen card'}</p>
-              <p className="text-sm text-muted">
-                {frozenCard.distance_km} km away · returns next Monday
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onUnfreeze}
-              disabled={busy}
-              className="tap rounded-full px-4 text-sm text-muted hover:text-ink disabled:opacity-40"
-            >
-              Return to the table
-            </button>
-          </div>
-        ) : (
-          <p className="py-4 text-center text-sm text-brass">Drop here to see this card again next Monday.</p>
+    <div className="sticky bottom-3 z-30 mx-auto mt-12 max-w-2xl">
+      <div
+        ref={vaultRef}
+        role="region"
+        aria-label="Freeze Vault"
+        className={cx(
+          'flex items-center gap-3 rounded-[1.5rem] border border-dashed px-4 py-2.5 backdrop-blur-md transition-colors duration-200 ease-calm',
+          dragging && over ? 'border-brass bg-brass/20' : dragging ? 'border-brass/60 bg-raised/95' : 'border-line bg-raised/90',
         )}
-      </CardVault>
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest/40 text-brass" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" />
+          </svg>
+        </span>
+        <div className="flex-1 text-sm leading-snug">
+          <p className="font-serif text-base">Freeze Vault</p>
+          {body}
+        </div>
+      </div>
     </div>
   );
 }

@@ -2,138 +2,117 @@
 
 import type { BatchCard, CardProfile } from '@thirtydates/shared';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Badge, cx } from './primitives';
+import { cx } from './primitives';
 
 /**
- * Faceless, nameless profile body: Life Rhythm, behavioral interests with their receipts, and
- * the split Flaw + Upside coin. Read as one whole portrait; structural gates are never shown.
+ * Faceless, nameless portrait: how this person lives, three things they actually do (in their
+ * own words), and their Flaw + Upside coin. Written to be read like a short letter, not scanned
+ * like a spec sheet. Structural gates are never shown.
  */
 export function CardBody({ profile }: { profile: CardProfile }) {
   return (
     <>
-      {/* Top: distance and Life Rhythm */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="brass">{profile.distance_km} km away</Badge>
-        <p className="text-sm text-muted">{profile.rhythm.join(' · ')}</p>
-      </div>
+      <p className="font-serif text-xl italic leading-snug text-ink/90">{profile.rhythm.join(', ').toLowerCase().replace(/^./, (c) => c.toUpperCase())}.</p>
+      <p className="mt-1 text-sm text-muted">About {profile.distance_km} km from you</p>
 
-      {/* Middle: three behavioral interests with receipts */}
-      <ul role="list" className="mt-4 space-y-3 rounded-2xl border border-line/60 bg-raised/40 p-4">
+      <ul role="list" className="mt-6 space-y-5">
         {profile.interests.map((interest) => (
           <li key={interest.position}>
-            <p className="font-serif text-xl leading-snug">{interest.label}</p>
-            <p className="text-sm text-muted">
-              <span className="text-brass" aria-hidden="true">
-                ✓{' '}
-              </span>
-              <span className="sr-only">Receipt: </span>
-              {interest.receipt}
-            </p>
+            <p className="font-serif text-2xl leading-tight">{interest.label}</p>
+            <p className="mt-1 text-[1.0625rem] leading-relaxed text-ink/75">“{interest.receipt}”</p>
           </li>
         ))}
       </ul>
 
-      {/* Bottom: the split Flaw + Upside coin */}
-      <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[2rem] border border-line/70">
-        <div className="border-r border-line/70 bg-forest/15 px-4 py-3">
-          <p className="eyebrow">My flaw</p>
-          <p className="mt-1 font-serif text-lg italic leading-snug">{profile.coin.flaw}</p>
+      {/* The Flaw + Upside coin: one honest trait, two faces. */}
+      <figure className="mt-7 flex items-stretch overflow-hidden rounded-[1.75rem] border border-brass/30 bg-gradient-to-r from-forest/25 via-transparent to-brass/10">
+        <div className="flex-1 py-4 pl-6 pr-4">
+          <figcaption className="font-serif text-sm italic text-muted">My flaw</figcaption>
+          <p className="font-serif text-lg leading-snug">{profile.coin.flaw}</p>
         </div>
-        <div className="bg-brass/5 px-4 py-3">
-          <p className="eyebrow">Your upside</p>
-          <p className="mt-1 font-serif text-lg italic leading-snug">{profile.coin.upside}</p>
+        <span className="my-3 w-px bg-brass/30" aria-hidden="true" />
+        <div className="flex-1 py-4 pl-4 pr-6 text-right">
+          <p className="font-serif text-sm italic text-muted">Your upside</p>
+          <p className="font-serif text-lg leading-snug">{profile.coin.upside}</p>
         </div>
-      </div>
+      </figure>
     </>
   );
 }
 
 export interface MondayCardProps {
   card: BatchCard;
-  /** Selection is open (Monday 07:00 – Tuesday night). */
+  /** Choosing is open (Monday 07:00 – Tuesday night). */
   interactive: boolean;
-  selectionsRemaining: number;
+  choicesLeft: number;
   canFreeze: boolean;
-  onSelect: (card: BatchCard) => void;
-  onPass: (card: BatchCard) => void;
+  onChoose: (card: BatchCard) => void;
   onFreeze: (card: BatchCard) => void;
   onDragStart?: (card: BatchCard, e: ReactPointerEvent<HTMLButtonElement>) => void;
 }
 
-/** The Monday faceless card: zero photos, zero names, one whole-profile choice. */
-export function MondayCard({
-  card,
-  interactive,
-  selectionsRemaining,
-  canFreeze,
-  onSelect,
-  onPass,
-  onFreeze,
-  onDragStart,
-}: MondayCardProps) {
-  const decided = card.my_action !== null;
-  const canAct = interactive && !decided && !card.frozen;
+function Snowflake() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" />
+    </svg>
+  );
+}
+
+/**
+ * The Monday faceless card. One gesture only: choose the whole person. There is no "pass":
+ * anyone not chosen simply isn't, and is never shown again.
+ */
+export function MondayCard({ card, interactive, choicesLeft, canFreeze, onChoose, onFreeze, onDragStart }: MondayCardProps) {
+  const canAct = interactive && !card.selected && !card.frozen;
 
   return (
     <li>
       <article
-        aria-label={`Card, ${card.distance_km} kilometres away`}
+        aria-label={`Introduction, about ${card.distance_km} kilometres away`}
         className={cx(
-          'relative flex h-full flex-col rounded-card border bg-panel p-5 shadow-card transition-opacity duration-300 ease-calm',
-          card.my_action === 'validated' ? 'border-brass/60' : 'border-line/70',
-          card.my_action === 'passed' && 'opacity-50',
+          'relative flex h-full flex-col rounded-[2rem] bg-panel px-6 pb-6 pt-7 shadow-card ring-1 transition-shadow duration-300 ease-calm sm:px-8',
+          card.selected ? 'ring-brass/60' : 'ring-line/50',
         )}
       >
-        {card.carried_over && <p className="eyebrow mb-3 text-brass">Carried over from last week</p>}
+        {card.carried_over && <p className="mb-3 font-serif text-sm italic text-brass">You kept this one from last week</p>}
 
         <CardBody profile={card} />
 
-        <div className="mt-5 flex flex-1 items-end justify-between gap-2">
-          {decided ? (
-            <p className={cx('text-sm', card.my_action === 'validated' ? 'text-brass' : 'text-muted')} role="status">
-              {card.my_action === 'validated' ? 'Selected. Sealed in blind escrow.' : 'Passed quietly.'}
+        <div className="mt-7 flex flex-1 flex-wrap items-end justify-between gap-3">
+          {card.selected ? (
+            <p className="font-serif text-lg italic text-brass" role="status">
+              You’d like to hear from them. They’ll only know if they chose you too.
             </p>
           ) : card.frozen ? (
-            <p className="text-sm text-brass" role="status">
-              In the Freeze Vault. It returns next Monday.
+            <p className="font-serif text-lg italic text-brass" role="status">
+              Kept in your Freeze Vault. They’ll be at your table again next Monday.
             </p>
           ) : canAct ? (
             <>
               <button
                 type="button"
-                onClick={() => onSelect(card)}
-                disabled={selectionsRemaining === 0}
-                className="tap rounded-full border border-brass/60 px-6 text-sm font-medium text-brass hover:bg-brass/10 disabled:border-line disabled:text-muted"
+                onClick={() => onChoose(card)}
+                disabled={choicesLeft === 0}
+                className="tap rounded-full bg-accent px-6 font-medium text-canvas shadow-sm transition-colors hover:bg-accent/90 disabled:bg-line disabled:text-muted"
               >
-                {selectionsRemaining > 0 ? 'Select' : 'No selections left'}
+                {choicesLeft > 0 ? 'I’d like to hear from them' : 'You’ve chosen three this week'}
               </button>
-              <div className="flex items-center">
-                {canFreeze && (
-                  <button
-                    type="button"
-                    onPointerDown={(e) => onDragStart?.(card, e)}
-                    onClick={() => onFreeze(card)}
-                    className="tap touch-none rounded-full text-muted hover:text-brass"
-                    aria-label="Move to the Freeze Vault (tap, or drag to the vault)"
-                    title="Drag to the Freeze Vault"
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <circle cx="9" cy="6" r="1.5" />
-                      <circle cx="15" cy="6" r="1.5" />
-                      <circle cx="9" cy="12" r="1.5" />
-                      <circle cx="15" cy="12" r="1.5" />
-                      <circle cx="9" cy="18" r="1.5" />
-                      <circle cx="15" cy="18" r="1.5" />
-                    </svg>
-                  </button>
-                )}
-                <button type="button" onClick={() => onPass(card)} className="tap rounded-full px-4 text-sm text-muted hover:text-ink">
-                  Pass
+              {canFreeze && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => onDragStart?.(card, e)}
+                  onClick={() => onFreeze(card)}
+                  className="tap touch-none gap-2 rounded-full border border-line px-5 text-sm text-muted transition-colors hover:border-brass hover:text-brass"
+                  title="Tap, or drag into the Freeze Vault below"
+                >
+                  <Snowflake />
+                  Keep for next week
                 </button>
-              </div>
+              )}
             </>
           ) : (
-            <p className="text-sm text-muted">Selection is closed for this week.</p>
+            <p className="font-serif italic text-muted">Choosing has closed for this week.</p>
           )}
         </div>
       </article>

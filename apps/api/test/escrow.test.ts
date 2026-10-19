@@ -4,13 +4,12 @@ import { withSystemTx, withUserTx } from '../src/db/pool.js';
 import { pairHash } from '../src/lib/crypto.js';
 import { freezeCard, getCurrentBatch, unfreezeCard } from '../src/services/batches.js';
 import { toneWav } from '../src/services/devTools.js';
-import { recordEscrowAction } from '../src/services/escrow.js';
+import { selectProfile } from '../src/services/escrow.js';
 import { getExchange, lockAnswers, pickPrompts, readAnswerAudio, runExchangeTick, sniffAudioType } from '../src/services/exchange.js';
 import { getMatch } from '../src/services/matches.js';
 import { TEST_WEEK, at, createMember, dealBatch, dealPair, makeCtx, resetDb } from './helpers.js';
 
 const ctx = makeCtx();
-const select = { kind: 'validated' } as const;
 const [P1, P2, P3] = VOICE_PROMPTS.map((p) => p.key) as [string, string, string];
 
 async function rawStakesVisibleTo(userId: string) {
@@ -32,8 +31,8 @@ async function mutualPair(names: [string, string] = ['Ana', 'Rui']) {
   const b = await createMember(ctx, { firstName: names[1] });
   ctx.setNow(at(0, 9));
   await dealPair(ctx, a, b);
-  await recordEscrowAction(ctx, a, b, select);
-  await recordEscrowAction(ctx, b, a, select);
+  await selectProfile(ctx, a, b);
+  await selectProfile(ctx, b, a);
   ctx.setNow(at(2, 0, 1)); // Wednesday 00:01
   await runExchangeTick(ctx);
   const { rows } = await ctx.db.query<{ id: string }>('SELECT id FROM voice_exchanges');
@@ -60,11 +59,11 @@ describe('Stage 2: whole-profile blind selection', () => {
     const a = await createMember(ctx);
     const b = await createMember(ctx);
     await dealPair(ctx, a, b);
-    await recordEscrowAction(ctx, a, b, select);
+    await selectProfile(ctx, a, b);
 
     expect(await rawStakesVisibleTo(b)).toHaveLength(0);
     expect(await rawStakesVisibleTo(a)).toHaveLength(1);
-    expect((await getCurrentBatch(ctx, b)).cards[0]!.my_action).toBeNull();
+    expect((await getCurrentBatch(ctx, b)).cards[0]!.selected).toBe(false);
   });
 
   it('cards carry Life Rhythm, interests and the coin, but no gates, names or photos', async () => {
@@ -73,19 +72,18 @@ describe('Stage 2: whole-profile blind selection', () => {
     await dealPair(ctx, a, b);
     const card = (await getCurrentBatch(ctx, a)).cards[0]!;
     expect(Object.keys(card).sort()).toEqual(
-      ['carried_over', 'coin', 'distance_km', 'frozen', 'interests', 'my_action', 'rhythm', 'user_id'].sort(),
+      ['carried_over', 'coin', 'distance_km', 'frozen', 'interests', 'rhythm', 'selected', 'user_id'].sort(),
     );
     expect(card.rhythm.length).toBeGreaterThan(0);
   });
 
-  it('allows three selections a week, and decisions are final', async () => {
+  it('allows three selections a week, and selections are final', async () => {
     const me = await createMember(ctx);
     const others = await Promise.all([1, 2, 3, 4].map(() => createMember(ctx)));
     await dealBatch(ctx, me, others);
-    for (const o of others.slice(0, 3)) await recordEscrowAction(ctx, me, o, select);
-    expect(await errorCode(recordEscrowAction(ctx, me, others[3]!, select))).toBe('selection_limit_reached');
-    expect(await errorCode(recordEscrowAction(ctx, me, others[0]!, { kind: 'passed' }))).toBe('card_already_decided');
-    await recordEscrowAction(ctx, me, others[3]!, { kind: 'passed' });
+    for (const o of others.slice(0, 3)) await selectProfile(ctx, me, o);
+    expect(await errorCode(selectProfile(ctx, me, others[3]!))).toBe('selection_limit_reached');
+    expect(await errorCode(selectProfile(ctx, me, others[0]!))).toBe('card_already_decided');
     expect((await getCurrentBatch(ctx, me)).selections_remaining).toBe(0);
   });
 
@@ -94,29 +92,17 @@ describe('Stage 2: whole-profile blind selection', () => {
     const b = await createMember(ctx);
     const c = await createMember(ctx);
     await dealPair(ctx, a, b);
-    expect(await errorCode(recordEscrowAction(ctx, a, c, select))).toBe('card_not_in_batch');
+    expect(await errorCode(selectProfile(ctx, a, c))).toBe('card_not_in_batch');
     ctx.setNow(at(2, 0, 1));
-    expect(await errorCode(recordEscrowAction(ctx, a, b, select))).toBe('selection_closed');
-  });
-
-  it('a pass never changes what the selector sees (no side channel)', async () => {
-    const a = await createMember(ctx);
-    const b = await createMember(ctx);
-    await dealPair(ctx, a, b);
-    await recordEscrowAction(ctx, a, b, select);
-    const before = await getCurrentBatch(ctx, a);
-    await recordEscrowAction(ctx, b, a, { kind: 'passed' });
-    const after = await getCurrentBatch(ctx, a);
-    expect(after.cards).toEqual(before.cards);
-    expect(after.selections_remaining).toBe(before.selections_remaining);
+    expect(await errorCode(selectProfile(ctx, a, b))).toBe('selection_closed');
   });
 
   it('mutual selections stay invisible until the exchange opens on Wednesday', async () => {
     const a = await createMember(ctx);
     const b = await createMember(ctx);
     await dealPair(ctx, a, b);
-    await recordEscrowAction(ctx, a, b, select);
-    await recordEscrowAction(ctx, b, a, select);
+    await selectProfile(ctx, a, b);
+    await selectProfile(ctx, b, a);
     expect((await getCurrentBatch(ctx, a)).exchanges).toEqual([]);
   });
 });
@@ -128,11 +114,10 @@ describe('Wednesday seal', () => {
     await dealBatch(ctx, b!, [a!]);
     await dealBatch(ctx, c!, [a!, d!]);
     await dealBatch(ctx, d!, [c!]);
-    await recordEscrowAction(ctx, a!, b!, select);
-    await recordEscrowAction(ctx, b!, a!, select);
-    await recordEscrowAction(ctx, a!, c!, select); // c ignores
-    await recordEscrowAction(ctx, c!, d!, select);
-    await recordEscrowAction(ctx, d!, c!, { kind: 'passed' });
+    await selectProfile(ctx, a!, b!);
+    await selectProfile(ctx, b!, a!);
+    await selectProfile(ctx, a!, c!); // c ignores
+    await selectProfile(ctx, c!, d!); // d never chooses c
 
     ctx.setNow(at(2, 0, 1));
     const tick = await runExchangeTick(ctx);
@@ -156,7 +141,7 @@ describe('Wednesday seal', () => {
     const a = await createMember(ctx);
     const b = await createMember(ctx);
     await dealPair(ctx, a, b);
-    await recordEscrowAction(ctx, b, a, select);
+    await selectProfile(ctx, b, a);
     await freezeCard(ctx, a, b);
     ctx.setNow(at(2, 0, 1));
     await runExchangeTick(ctx);
@@ -172,7 +157,7 @@ describe('Freeze Slot', () => {
     await dealBatch(ctx, me, [x!, y!]);
     await freezeCard(ctx, me, x!);
     expect(await errorCode(freezeCard(ctx, me, y!))).toBe('already_frozen');
-    expect(await errorCode(recordEscrowAction(ctx, me, x!, select))).toBe('card_frozen');
+    expect(await errorCode(selectProfile(ctx, me, x!))).toBe('card_frozen');
     expect((await getCurrentBatch(ctx, me)).freeze).toEqual({ token_available: false, used_for: 'card_carry', frozen_user_id: x });
     await unfreezeCard(ctx, me);
     expect((await getCurrentBatch(ctx, me)).freeze.token_available).toBe(true);
@@ -276,7 +261,7 @@ describe('member deletion', () => {
     const a = await createMember(ctx);
     const b = await createMember(ctx);
     await dealPair(ctx, a, b);
-    await recordEscrowAction(ctx, a, b, select);
+    await selectProfile(ctx, a, b);
     await ctx.db.query('DELETE FROM users WHERE id = $1', [b]);
     const rows = await withSystemTx(ctx.db, async (tx) => (await tx.query('SELECT status, user_a_id, user_b_id FROM escrow_vault')).rows);
     expect(rows).toEqual([{ status: 'wiped', user_a_id: null, user_b_id: null }]);

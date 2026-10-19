@@ -13,6 +13,7 @@
   --color-line: 221 216 207;
   --color-accent: 169 87 62; /* terracotta deep: AA contrast on bone */
   --color-brass: 138 112 34;
+  --glow: radial-gradient(ellipse 90% 50% at 50% -10%, rgb(212 175 55 / 0.10), transparent 70%);
   color-scheme: light;
 }
 
@@ -25,6 +26,8 @@
   --color-line: 42 48 60;
   --color-accent: 200 109 81; /* #C86D51 */
   --color-brass: 212 175 55; /* #D4AF37 */
+  /* Low lamplight over the lounge table. */
+  --glow: radial-gradient(ellipse 90% 50% at 50% -10%, rgb(42 59 60 / 0.55), transparent 70%);
   color-scheme: dark;
 }
 
@@ -36,6 +39,8 @@
   body {
     @apply bg-canvas font-sans text-base text-ink antialiased;
     min-height: 100dvh;
+    background-image: var(--glow);
+    background-repeat: no-repeat;
   }
   h1,
   h2,
@@ -55,8 +60,9 @@
   .tap {
     @apply inline-flex min-h-touch min-w-touch items-center justify-center;
   }
+  /* Small, quiet captions: an italic serif aside, never a shouty uppercase label. */
   .eyebrow {
-    @apply font-sans text-xs uppercase tracking-eyebrow text-muted;
+    @apply font-serif text-base italic text-muted;
   }
   .hairline {
     @apply border-line/70;

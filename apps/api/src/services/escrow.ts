@@ -15,16 +15,13 @@ import { orderedPair, pairHash } from '../lib/crypto.js';
  *  - The target is never notified. Responses to the actor are identical whatever the
  *    counterpart did, and the counterpart can only read a stake after acting on it themselves
  *    (RLS policy `escrow_party_read`), so an unreciprocated validation is invisible.
- *  - A pass never mutates the counterpart's stake mid-week: wiping happens only when selection
- *    closes. An immediate wipe would change the selector's own view and leak the pass.
- *  - Actions are final for the week; at most three whole-profile selections per user per UTC week.
+ *  - There is no "pass". A card that isn't selected simply isn't chosen, and its stake is
+ *    wiped when selection closes. Nobody ever rejects anybody.
+ *  - Selections are final for the week; at most three whole profiles per user per UTC week.
  *  - A card frozen by a party who has not acted is carried into next week: its stake moves to
  *    the next batch week instead of being wiped. Carries are one-sided (only the freezer sees
  *    the card again), so the counterpart never learns they were frozen.
  */
-
-/** 'validated' = the member selected this whole profile into blind escrow. */
-export type EscrowAction = { kind: 'validated' } | { kind: 'passed' };
 
 interface BatchRow {
   card_user_ids: string[];
@@ -53,12 +50,8 @@ export async function countWeeklyValidations(tx: Tx, userId: string, weekStart: 
   return rows[0]!.n;
 }
 
-export async function recordEscrowAction(
-  ctx: AppContext,
-  actorId: string,
-  targetId: string,
-  action: EscrowAction,
-): Promise<void> {
+/** Selects a whole profile into blind escrow (stored as the 'validated' action). */
+export async function selectProfile(ctx: AppContext, actorId: string, targetId: string): Promise<void> {
   const now = ctx.now();
   const clock = weekClock(now);
   if (clock.phase !== 'selection') {
@@ -69,14 +62,7 @@ export async function recordEscrowAction(
   await withSystemTx(ctx.db, async (tx) => {
     const batch = await lockActorBatch(tx, actorId, clock.batchWeek);
     if (!batch.card_user_ids.includes(targetId)) throw notFound('card_not_in_batch', 'That card is not in your batch');
-    if (batch.frozen_user_id === targetId) throw conflict('card_frozen', 'Unfreeze this card before deciding on it');
-
-    if (action.kind === 'validated') {
-      const used = await countWeeklyValidations(tx, actorId, clock.weekStart);
-      if (used >= MAX_WEEKLY_SELECTIONS) {
-        throw conflict('selection_limit_reached', `You can select up to ${MAX_WEEKLY_SELECTIONS} profiles a week`);
-      }
-    }
+    if (batch.frozen_user_id === targetId) throw conflict('card_frozen', 'Take this card out of the Freeze Vault first');
 
     const [lo, hi] = orderedPair(actorId, targetId);
     const hash = pairHash(lo, hi, ctx.config.ESCROW_PAIR_SALT);
@@ -101,18 +87,22 @@ export async function recordEscrowAction(
     const mine = side === 'a' ? stake.user_a_action : stake.user_b_action;
     const theirs = side === 'a' ? stake.user_b_action : stake.user_a_action;
     if (stake.status === 'wiped' || mine !== 'pending') {
-      throw conflict('card_already_decided', 'You have already decided on this card');
+      throw conflict('card_already_decided', 'You have already chosen this person');
+    }
+    const used = await countWeeklyValidations(tx, actorId, clock.weekStart);
+    if (used >= MAX_WEEKLY_SELECTIONS) {
+      throw conflict('selection_limit_reached', `You can choose up to ${MAX_WEEKLY_SELECTIONS} people a week`);
     }
 
-    const becomesMutual = action.kind === 'validated' && theirs === 'validated';
+    const becomesMutual = theirs === 'validated';
     await tx.query(
       `UPDATE escrow_vault SET
-         user_${side}_action = $2::escrow_action,
-         user_${side}_acted_at = CASE WHEN $2 = 'validated' THEN $3::timestamptz END,
-         status = CASE WHEN $4 THEN 'mutual_unlocked'::escrow_status ELSE status END,
-         mutual_at = CASE WHEN $4 THEN $3::timestamptz ELSE mutual_at END
+         user_${side}_action = 'validated',
+         user_${side}_acted_at = $2,
+         status = CASE WHEN $3 THEN 'mutual_unlocked'::escrow_status ELSE status END,
+         mutual_at = CASE WHEN $3 THEN $2::timestamptz ELSE mutual_at END
        WHERE id = $1`,
-      [stake.id, action.kind, now, becomesMutual],
+      [stake.id, now, becomesMutual],
     );
   });
 }

@@ -240,7 +240,7 @@ export function ProfileForm({
 
       <Panel className="space-y-6 p-6">
         <div>
-          <h2 className="text-2xl">Life architecture</h2>
+          <h2 className="text-2xl">How you want to live</h2>
           <p className="mt-1 text-sm text-muted">Never shown on your card. We use it quietly so everyone you meet already fits how you want to live.</p>
         </div>
         <Segmented legend={GATE_QUESTIONS.family_goal} options={FAMILY_GOALS} labels={GATE_LABELS.family_goal} value={draft.gates.family_goal} onChange={(v) => setGate('family_goal', v)} />
@@ -250,7 +250,10 @@ export function ProfileForm({
       </Panel>
 
       <Panel className="space-y-5 p-6">
-        <h2 className="text-2xl">Your Flaw + Upside coin</h2>
+        <div>
+          <h2 className="text-2xl">Your Flaw + Upside coin</h2>
+          <p className="mt-1 text-sm text-muted">One honest flaw, and the good side of it that someone close to you gets to enjoy.</p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="My flaw" htmlFor="flaw">
             <input
@@ -276,9 +279,11 @@ export function ProfileForm({
       </Panel>
 
       <Panel className="space-y-5 p-6">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-2xl">Three behavioral interests</h2>
-          <span className="text-sm text-muted">{draft.interests.length}/3</span>
+        <div>
+          <h2 className="text-2xl">Three things you actually do</h2>
+          <p className="mt-1 text-sm text-muted">
+            Not what you like in theory, what fills your weeks. {draft.interests.length < 3 ? `Choose ${3 - draft.interests.length} more.` : ''}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {INTEREST_CATALOG.map((i) => {
@@ -303,9 +308,9 @@ export function ProfileForm({
         {draft.interests.map((sel, idx) => {
           const def = INTEREST_BY_KEY.get(sel.key)!;
           return (
-            <Field key={sel.key} label={`Receipt · ${def.label}`} htmlFor={`receipt-${sel.key}`} hint="A concrete thing you actually do.">
+            <Field key={sel.key} label={`${def.label}: what does that look like for you?`} htmlFor={`detail-${sel.key}`} hint="Something you actually do, in your own words. Concrete beats clever.">
               <input
-                id={`receipt-${sel.key}`}
+                id={`detail-${sel.key}`}
                 className={inputClass}
                 maxLength={140}
                 placeholder={def.receiptHint}

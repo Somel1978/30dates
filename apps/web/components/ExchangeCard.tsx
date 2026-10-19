@@ -7,10 +7,10 @@ import { CardBody } from './MondayCard';
 import { cx } from './primitives';
 
 const STATUS: Record<ExchangeSummary['status'], string> = {
-  questions: 'Choose 2–3 questions for them',
-  answering: 'Record your answers',
-  released: 'Released',
-  expired: 'Closed',
+  questions: 'Choose two or three questions for them',
+  answering: 'Answer their questions in your voice',
+  released: 'You’ve heard each other',
+  expired: 'This one has closed',
 };
 
 /** A mutual pair's voice exchange on the weekly dashboard. Faceless until both lock. */
@@ -19,27 +19,27 @@ export function ExchangeCard({ exchange, serverNow }: { exchange: ExchangeSummar
   const photo = revealed?.photo_ids[0];
   let detail: React.ReactNode;
   if (exchange.status === 'questions') {
-    detail = exchange.my_pick_count ? `${exchange.my_pick_count} questions chosen. Change them until Thursday.` : 'Pick what you’d like to hear them answer.';
+    detail = exchange.my_pick_count ? `${exchange.my_pick_count} questions chosen. Change them until Thursday.` : 'Pick what you’d most like to hear them answer.';
   } else if (exchange.status === 'answering') {
     detail = exchange.i_locked ? (
-      'Locked. Nothing is shared until you have both locked.'
+      'Your answers are sent. Nothing is shared until they’ve sent theirs too.'
     ) : (
       <>
-        Response Clock: <Countdown to={exchange.answers_close_at} serverNow={serverNow} className="text-ink" /> left
+        <Countdown to={exchange.answers_close_at} serverNow={serverNow} className="text-ink" /> left to answer
       </>
     );
   } else if (exchange.status === 'released') {
-    detail = 'Voice notes, name and photos are unlocked. Your First-Meet Bridge is open.';
+    detail = 'You can hear their answers and see each other now. Next: a first meeting over coffee or wine.';
   } else {
-    detail = 'The Response Clock ran out. Nothing was shared.';
+    detail = 'Time ran out before you both answered, so nothing was shared.';
   }
 
   return (
     <li>
       <article
         className={cx(
-          'rounded-card border bg-panel p-5 shadow-card',
-          exchange.status === 'expired' ? 'border-line/60 opacity-60' : 'border-brass/40',
+          'rounded-[2rem] bg-panel px-6 pb-6 pt-6 shadow-card ring-1 sm:px-8',
+          exchange.status === 'expired' ? 'opacity-60 ring-line/50' : 'ring-brass/40',
         )}
       >
         <header className="mb-4 flex items-center gap-4">
@@ -57,7 +57,7 @@ export function ExchangeCard({ exchange, serverNow }: { exchange: ExchangeSummar
           )}
           <div>
             <p className="eyebrow text-brass">{STATUS[exchange.status]}</p>
-            <p className="font-serif text-2xl">{revealed ? revealed.first_name : 'Mutual selection'}</p>
+            <p className="font-serif text-2xl">{revealed ? revealed.first_name : 'Someone who chose you'}</p>
           </div>
         </header>
 
@@ -67,11 +67,11 @@ export function ExchangeCard({ exchange, serverNow }: { exchange: ExchangeSummar
         {exchange.status !== 'expired' && (
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href={`/exchanges/${exchange.id}`} className="tap rounded-full bg-accent px-6 text-sm font-medium text-canvas">
-              {exchange.status === 'released' ? 'Hear their answers' : 'Open the exchange'}
+              {exchange.status === 'released' ? 'Hear their answers' : exchange.status === 'questions' ? 'Choose questions' : 'Answer them'}
             </Link>
             {exchange.match_id && (
               <Link href={`/matches/${exchange.match_id}`} className="tap rounded-full border border-brass/60 px-6 text-sm text-brass">
-                First-Meet Bridge
+                Plan the first meeting
               </Link>
             )}
           </div>

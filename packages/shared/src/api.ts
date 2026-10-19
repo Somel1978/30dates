@@ -51,7 +51,6 @@ export interface ProfileResponse {
   gates: LifeArchitectureGates;
   coin: { flaw: string; upside: string };
   interests: { key: string; receipt: string }[];
-  paused: boolean;
   preview: CardProfile;
 }
 
@@ -87,7 +86,8 @@ export interface CardProfile {
 export interface BatchCard extends CardProfile {
   carried_over: boolean;
   frozen: boolean;
-  my_action: 'validated' | 'passed' | null;
+  /** Chosen into blind escrow this week. There is no pass: unchosen cards simply lapse. */
+  selected: boolean;
 }
 
 export type ExchangeStatus = 'questions' | 'answering' | 'released' | 'expired';

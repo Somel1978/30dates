@@ -41,7 +41,7 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
 
   return (
     <Panel className="p-6">
-      <h2 className="text-2xl">Drop 2–3 questions for them</h2>
+      <h2 className="text-2xl">What would you love to hear them answer?</h2>
       <p className="mt-1 text-sm text-muted">
         They’ll answer by voice once the Response Clock starts. You can change your choice until{' '}
         <Countdown to={exchange.questions_close_at} serverNow={exchange.server_now} className="text-ink" /> from now.
@@ -69,7 +69,7 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
       </ul>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Button onClick={save} busy={busy} disabled={!valid || !dirty}>
-          {exchange.my_picks.length ? 'Update my questions' : 'Drop my questions'}
+          {exchange.my_picks.length ? 'Update my questions' : 'Send my questions'}
         </Button>
         <span className="text-sm text-muted">{picked.length} of 2–3 chosen</span>
       </div>
@@ -125,7 +125,7 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
         </p>
       </div>
       <p className="mt-1 text-sm text-muted">
-        Take as many takes as you need; drafts stay on this device. Nothing is sent, and neither of you hears anything, until you’ve both locked.
+        Take as many takes as you need; drafts stay on this device. Nothing is sent, and neither of you hears anything, until you’ve both sent your answers.
       </p>
       {!support.ok && (
         <div className="mt-4">
@@ -146,24 +146,24 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button onClick={() => setConfirming(true)} disabled={!ready} busy={busy}>
-          Lock my answers
+          Send my answers
         </Button>
-        {!ready && <span className="text-sm text-muted">Record every answer to lock.</span>}
+        {!ready && <span className="text-sm text-muted">Record an answer to each question first.</span>}
       </div>
       {error && (
         <div className="mt-3">
           <Notice tone="error">{error}</Notice>
         </div>
       )}
-      <BottomSheet open={confirming} title="Lock your answers?" onClose={() => setConfirming(false)}>
+      <BottomSheet open={confirming} title="Send your answers?" onClose={() => setConfirming(false)}>
         <p className="text-muted">
-          Locking is final. Your voice notes are sealed in the vault and released only when they lock theirs: at that moment you both hear each other, and names and photos unblur together.
+          Once sent, they’re final. They stay sealed until they send theirs, and then you hear each other and see each other’s name and face at the same moment.
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirming(false)}>
             Keep recording
           </Button>
-          <Button onClick={lock}>Lock and seal</Button>
+          <Button onClick={lock}>Send them</Button>
         </div>
       </BottomSheet>
     </Panel>
@@ -226,9 +226,9 @@ export default function ExchangePage() {
       {exchange.status === 'answering' && exchange.i_locked && (
         <>
           <Panel className="p-6">
-            <h2 className="text-2xl">Locked and sealed</h2>
+            <h2 className="text-2xl">Your answers are sent</h2>
             <p className="mt-1 text-muted">
-              Nothing is shared until they lock theirs. If the Response Clock runs out first (
+              Nothing is shared until they send theirs. If the Response Clock runs out first (
               <Countdown to={exchange.answers_close_at} serverNow={exchange.server_now} className="text-ink" />
               ), the exchange closes quietly and your voice notes are deleted.
             </p>
@@ -239,7 +239,7 @@ export default function ExchangePage() {
       {exchange.status === 'released' && (
         <>
           <Panel className="border-brass/50 p-6">
-            <h2 className="text-2xl">You both locked</h2>
+            <h2 className="text-2xl">You’ve heard each other</h2>
             <p className="mt-1 text-muted">Names and photos are unblurred and your First-Meet Bridge is open for the next 72 hours.</p>
             {exchange.match_id && (
               <Link href={`/matches/${exchange.match_id}`} className="tap mt-4 rounded-full bg-accent px-6 text-sm font-medium text-canvas">
@@ -254,7 +254,7 @@ export default function ExchangePage() {
       {exchange.status === 'expired' && (
         <Panel className="p-6">
           <h2 className="text-2xl">This exchange has closed</h2>
-          <p className="mt-1 text-muted">The Response Clock ran out before you both locked. Nothing was shared, and the recordings were deleted.</p>
+          <p className="mt-1 text-muted">The Response Clock ran out before you both answered. Nothing was shared, and the recordings were deleted.</p>
         </Panel>
       )}
 

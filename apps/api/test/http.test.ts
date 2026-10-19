@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { VOICE_PROMPTS } from '@thirtydates/shared';
 import { toneWav } from '../src/services/devTools.js';
-import { recordEscrowAction } from '../src/services/escrow.js';
+import { selectProfile } from '../src/services/escrow.js';
 import { pickPrompts, runExchangeTick } from '../src/services/exchange.js';
 import { at, createMember, dealPair, makeCtx, resetDb } from './helpers.js';
 
@@ -207,7 +207,7 @@ describe('escrow endpoints', () => {
     expect(res.json()).toEqual({ accepted: true });
 
     const batch = (await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie } })).json();
-    expect(batch.cards[0]).toMatchObject({ user_id: other, my_action: 'validated' });
+    expect(batch.cards[0]).toMatchObject({ user_id: other, selected: true });
     expect(batch.cards[0]).not.toHaveProperty('first_name');
     expect(JSON.stringify(batch)).not.toContain('photo');
   });
@@ -234,7 +234,7 @@ describe('voice exchange over HTTP', () => {
     const b = await createMember(ctx, { lat: 38.71, lng: -9.14, gender: 'man', seeks: 'women' });
     await dealPair(ctx, a, b);
     await app.inject({ method: 'POST', url: '/api/escrow/select', headers: { cookie: cookieA, ...ORIGIN }, payload: { target_user_id: b } });
-    await recordEscrowAction(ctx, b, a, { kind: 'validated' });
+    await selectProfile(ctx, b, a);
     ctx.setNow(at(2, 1));
     await runExchangeTick(ctx);
     const exchangeId = (await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie: cookieA } })).json()

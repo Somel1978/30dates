@@ -66,59 +66,19 @@ export function Panel({ children, className, as: Tag = 'section' }: { children: 
 }
 
 /**
- * "The Weekly Table": the place where this week's cards are laid out. A felt-like surface with
- * a caption rail; children are laid out as a responsive grid (stack on phones).
+ * "The Weekly Table": this week's introductions, laid out one at a time like letters on a table,
+ * to be read rather than scanned.
  */
-export function WeeklyTable({ title, caption, children }: { title: string; caption?: ReactNode; children: ReactNode }) {
+export function WeeklyTable({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section aria-label={title} className="relative rounded-sheet border border-line/60 bg-forest/10 p-4 sm:p-6 dark:bg-forest/20">
-      <header className="mb-5 flex flex-wrap items-baseline justify-between gap-2 px-1">
-        <h2 className="text-2xl">{title}</h2>
-        {caption && <div className="text-sm text-muted">{caption}</div>}
-      </header>
-      <ul role="list" className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+    <section aria-label={title} className="mx-auto max-w-2xl">
+      <h2 className="mb-8 flex items-center gap-4 text-center text-3xl before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+        {title}
+      </h2>
+      <ul role="list" className="space-y-10">
         {children}
       </ul>
     </section>
-  );
-}
-
-/**
- * "The Card Vault": a recessed, slotted compartment for what is kept aside (the frozen card,
- * revealed pairs). `highlight` brightens the edge while something is dragged over it.
- */
-export function CardVault({
-  label,
-  hint,
-  highlight,
-  children,
-  className,
-  vaultRef,
-}: {
-  label: string;
-  hint?: ReactNode;
-  highlight?: boolean;
-  children?: ReactNode;
-  className?: string;
-  vaultRef?: React.Ref<HTMLDivElement>;
-}) {
-  return (
-    <div
-      ref={vaultRef}
-      role="region"
-      aria-label={label}
-      className={cx(
-        'rounded-sheet border border-dashed px-4 transition-colors duration-200 ease-calm',
-        highlight ? 'border-brass bg-brass/15' : 'border-line bg-raised/90',
-        className,
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="eyebrow">{label}</p>
-        {hint && <div className="text-xs text-muted">{hint}</div>}
-      </div>
-      {children && <div className="mt-3">{children}</div>}
-    </div>
   );
 }
 

@@ -206,19 +206,18 @@ export async function getMe(ctx: AppContext, userId: string): Promise<MeResponse
 export async function getProfile(ctx: AppContext, userId: string): Promise<ProfileResponse> {
   return withUserTx(ctx.db, userId, async (tx) => {
     const { rows } = await tx.query<
-      Omit<ProfileResponse, 'gates' | 'coin' | 'interests' | 'paused' | 'preview'> & {
+      Omit<ProfileResponse, 'gates' | 'coin' | 'interests' | 'preview'> & {
         family_goal: ProfileResponse['gates']['family_goal'];
         living_architecture: ProfileResponse['gates']['living_architecture'];
         mobility: ProfileResponse['gates']['mobility'];
         financial_rhythm: ProfileResponse['gates']['financial_rhythm'];
         flaw: string;
         upside: string;
-        paused_at: Date | null;
         interests: { key: string; receipt: string }[];
       }
     >(
       `SELECT u.first_name, u.birth_date, u.gender, u.seeks, u.country_code, u.postal_code, u.search_radius_km,
-              u.time_zone, u.paused_at, g.family_goal, g.living_architecture, g.mobility, g.financial_rhythm,
+              u.time_zone, g.family_goal, g.living_architecture, g.mobility, g.financial_rhythm,
               c.flaw, c.upside,
               coalesce((SELECT json_agg(json_build_object('key', bi.interest_key, 'receipt', bi.receipt) ORDER BY bi.position)
                           FROM behavioral_interests bi WHERE bi.user_id = u.id), '[]') AS interests
@@ -248,13 +247,7 @@ export async function getProfile(ctx: AppContext, userId: string): Promise<Profi
       },
       coin: { flaw: r.flaw, upside: r.upside },
       interests: r.interests,
-      paused: r.paused_at !== null,
       preview,
     };
   });
-}
-
-/** Paused members keep their matches and chats but are left out of new deals. */
-export async function setPaused(ctx: AppContext, userId: string, paused: boolean): Promise<void> {
-  await ctx.db.query('UPDATE users SET paused_at = CASE WHEN $2 THEN coalesce(paused_at, now()) END WHERE id = $1', [userId, paused]);
 }

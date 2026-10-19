@@ -16,7 +16,7 @@ import { withSystemTx } from '../db/pool.js';
 import { HttpError, conflict } from '../lib/errors.js';
 import { runJob } from '../jobs.js';
 import { runMondayBatch } from '../matching/matching.js';
-import { recordEscrowAction } from './escrow.js';
+import { selectProfile } from './escrow.js';
 import { lockAnswers, pickPrompts } from './exchange.js';
 import { completeOnboarding, onboardingSchema } from './onboarding.js';
 
@@ -153,7 +153,7 @@ export async function selectMe(ctx: AppContext, userId: string, count: number): 
   for (const other of cards.rows[0]?.card_user_ids ?? []) {
     if (selected >= count) break;
     try {
-      await recordEscrowAction(ctx, other, userId, { kind: 'validated' });
+      await selectProfile(ctx, other, userId);
       selected++;
     } catch (err) {
       // Already decided on me, out of selections, or froze me: try the next card.

@@ -98,7 +98,7 @@ The 32-d psychometric vector is built deterministically from onboarding answers 
 
 - `pair_hash = HMAC-SHA256(min(uuid) ‖ max(uuid), ESCROW_PAIR_SALT)`.
 - `escrow_vault` uses `FORCE ROW LEVEL SECURITY`. In a user transaction, a member can read a stake only after acting on it themselves, so an unreciprocated selection is invisible to its target. The `escrow_my_stakes` view projects only the caller's own side.
-- **No side channel from passing.** A pass never changes the selector's view. Wiping happens only when selection seals on Wednesday, and wiped rows are scrubbed of both user ids, actions and timestamps (a database constraint enforces this).
+- **No pass, no rejection.** There is no pass or swipe-left: a member only ever chooses, and anyone not chosen simply lapses (passing trains a rejection mindset; see Pronk & Denissen, 2020). Unreciprocated choices are wiped when selection seals on Wednesday, and wiped rows are scrubbed of both user ids, actions and timestamps (a database constraint enforces this).
 - **Selection is a whole-profile choice.** There are no stamps and no line tags.
 - **Freeze carry is one-sided.** Only the freezer sees the card again; the counterpart's sealed stake moves to next week, so they never learn they were frozen.
 - **Double-blind voice exchange:**

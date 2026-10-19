@@ -14,7 +14,7 @@ import { loadCardProfiles } from './profiles.js';
 
 interface StakeRow {
   counterpart_id: string;
-  my_action: 'validated' | 'passed';
+  my_action: 'pending' | 'validated';
 }
 
 /** GET /api/batches/current — the member's own view of the week, read under row-level security. */
@@ -55,7 +55,7 @@ export async function getCurrentBatch(ctx: AppContext, userId: string): Promise<
           ...profile,
           carried_over: batch?.carried_over_user_id === id,
           frozen: batch?.frozen_user_id === id,
-          my_action: stake?.my_action ?? null,
+          selected: stake?.my_action === 'validated',
         },
       ];
     });

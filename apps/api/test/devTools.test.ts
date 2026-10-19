@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getCurrentBatch } from '../src/services/batches.js';
 import { counterpartsAct, dealNow, devStatus, moveClock, seedMembersAround, selectMe, toneWav } from '../src/services/devTools.js';
-import { recordEscrowAction } from '../src/services/escrow.js';
+import { selectProfile } from '../src/services/escrow.js';
 import { getExchange, lockAnswers, pickPrompts } from '../src/services/exchange.js';
 import { VOICE_PROMPTS } from '@thirtydates/shared';
 import { at, createMember, makeCtx, resetDb } from './helpers.js';
@@ -24,7 +24,7 @@ describe('test tools', () => {
 
     expect(await selectMe(ctx, me, 3)).toBe(3);
     const batch = await getCurrentBatch(ctx, me);
-    for (const card of batch.cards.slice(0, 3)) await recordEscrowAction(ctx, me, card.user_id, { kind: 'validated' });
+    for (const card of batch.cards.slice(0, 3)) await selectProfile(ctx, me, card.user_id);
 
     await moveClock(ctx, 'wednesday');
     const view = await getCurrentBatch(ctx, me);
