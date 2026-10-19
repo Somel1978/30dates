@@ -69,7 +69,8 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
     const token = await reply.jwtSign({ sub: userId, tv: tokenVersion });
     reply.setCookie(SESSION_COOKIE, token, {
       httpOnly: true,
-      secure: ctx.config.NODE_ENV === 'production',
+      // Secure whenever the site is served over HTTPS; a plain-http LAN origin would never send it back.
+      secure: ctx.config.WEB_ORIGIN.startsWith('https://'),
       sameSite: 'lax',
       path: '/',
       maxAge: SESSION_TTL_SECONDS,

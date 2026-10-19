@@ -1,0 +1,19 @@
+[Unit]
+Description=Thirty Dates scheduler (Monday deal, Sunday reveal, maintenance)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=thirtydates
+Group=thirtydates
+WorkingDirectory=/opt/thirtydates/app/apps/api
+EnvironmentFile=/etc/thirtydates/thirtydates.env
+ExecStart=/usr/bin/node dist/worker.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

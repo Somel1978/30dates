@@ -13,6 +13,8 @@ db/migrations     PostgreSQL + PostGIS + pgvector schema
 
 You need Node 20+ and PostgreSQL 15+ with the PostGIS and pgvector extensions. No Docker.
 
+**Deploying to a server?** [docs/deploy-debian-lxc.md](docs/deploy-debian-lxc.md) goes step by step from a bare Debian LXC container to the app running under systemd, either on your LAN or behind HTTPS.
+
 ### Database
 
 Install natively, using whichever line matches your machine:

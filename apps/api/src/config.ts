@@ -7,6 +7,8 @@ const schema = z.object({
   ESCROW_PAIR_SALT: z.string().min(32, 'ESCROW_PAIR_SALT must be at least 32 characters'),
   CRON_SECRET: z.string().min(16, 'CRON_SECRET must be at least 16 characters'),
   API_PORT: z.coerce.number().int().positive().default(4000),
+  /** The web app proxies /api to this address, so the API only needs to listen locally. */
+  API_HOST: z.string().default('127.0.0.1'),
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
   SMTP_URL: z.string().optional().default(''),
   MAIL_FROM: z.string().default('Thirty Dates <hello@thirtydates.local>'),

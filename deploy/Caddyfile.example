@@ -1,0 +1,6 @@
+# /etc/caddy/Caddyfile — HTTPS in front of the web app.
+# Point your domain's DNS at your public IP and forward ports 80 and 443 to this container.
+dates.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+}

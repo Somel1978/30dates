@@ -37,6 +37,7 @@ export function makeCtx(now: Date = at(0, 9)): TestContext {
       ESCROW_PAIR_SALT: 'test-escrow-salt-test-escrow-salt-0123456789',
       CRON_SECRET: 'test-cron-secret-0123',
       API_PORT: 0,
+      API_HOST: '127.0.0.1',
       WEB_ORIGIN: 'http://web.test',
       SMTP_URL: '',
       MAIL_FROM: 'test@thirtydates.local',

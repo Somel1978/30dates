@@ -1,0 +1,21 @@
+[Unit]
+Description=Thirty Dates API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=thirtydates
+Group=thirtydates
+WorkingDirectory=/opt/thirtydates/app/apps/api
+EnvironmentFile=/etc/thirtydates/thirtydates.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=5
+# Creates /var/lib/thirtydates (photo uploads) owned by the service user.
+StateDirectory=thirtydates
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
