@@ -31,7 +31,7 @@ Do steps 0–9, then follow step 10A or 10B.
 
 | Setting | Value |
 |---|---|
-| Template | `debian-12-standard` (Debian 13 also works) |
+| Template | `debian-13-standard` or `debian-12-standard` |
 | Unprivileged | Yes (default) |
 | CPU | 2 cores |
 | Memory | **4096 MB** (the web build needs ~2 GB; 2048 MB works if you also give 2048 MB swap) |
@@ -69,9 +69,23 @@ Next time, log in as `thirty` directly: through the console, or over SSH with `s
 
 The app keeps all of its schedules in UTC, so the container's own time zone doesn't matter. The container takes its clock from the Proxmox host, so make sure the **host** keeps accurate time (NTP).
 
-## 2. PostgreSQL 16 + PostGIS + pgvector
+## 2. PostgreSQL + PostGIS + pgvector
 
-Debian's own pgvector package is too old (the schema uses an HNSW index, which needs pgvector ≥ 0.5). Use the official PostgreSQL apt repository instead:
+The schema needs pgvector 0.5 or newer (it uses an HNSW index). Which commands you run depends on your Debian release:
+
+```bash
+grep VERSION_CODENAME /etc/os-release
+```
+
+**Debian 13 (trixie).** This is the current Proxmox template. Debian's own packages are new enough (PostgreSQL 17, PostGIS 3.5, pgvector 0.8):
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-17-postgis-3 postgresql-17-pgvector
+sudo systemctl enable --now postgresql
+```
+
+**Debian 12 (bookworm).** Debian's pgvector is too old there, so use the official PostgreSQL repository and PostgreSQL 16:
 
 ```bash
 sudo apt install -y postgresql-common
@@ -80,15 +94,14 @@ sudo apt install -y postgresql-16 postgresql-16-postgis-3 postgresql-16-pgvector
 sudo systemctl enable --now postgresql
 ```
 
-**Check before moving on.** Each command should succeed:
+**Check before moving on.** Both commands should succeed:
 
 ```bash
-apt-cache policy postgresql-16 | head -3   # "Installed:" shows a version, not "(none)"
-pg_lsclusters                               # 16  main  5432  online …
+pg_lsclusters                                  # 17 (or 16)  main  5432  online …
 sudo -u postgres psql -c "SELECT version();"
 ```
 
-If `pg_lsclusters` shows the cluster as `down`, start it with `sudo pg_ctlcluster 16 main start`. If the `apt install` line printed errors, fix those first; nothing later works without PostgreSQL.
+If `pg_lsclusters` prints nothing, PostgreSQL didn't install: re-read the `apt install` output for errors. If the cluster shows `down`, start it with `sudo pg_ctlcluster <version> main start`. Nothing later works until this check passes.
 
 ## 3. Node.js 22
 
@@ -335,8 +348,8 @@ Jobs are safe to repeat; a job that isn't due yet answers `409 job_not_due`.
 | `EACCES` writing uploads | `~/30dates-data/uploads` is missing or not owned by you: `mkdir -p ~/30dates-data/uploads`. |
 | Sign-in link works but you land back on sign-in | `WEB_ORIGIN` doesn't match the browser address, or you opened the link in a different browser. |
 | `403 Cross-origin request rejected` | Same: fix `WEB_ORIGIN`, then `sudo systemctl restart thirtydates-api`. |
-| `No existing cluster is suitable as a default target` / `You must install at least one postgresql-client-<version> package` | PostgreSQL never installed: step 2's `apt install` failed. Redo step 2 line by line and run its checks. |
-| `type "vector" does not exist` | pgvector isn't installed for PostgreSQL 16: redo step 2 using the PGDG repository. |
+| `No existing cluster is suitable as a default target` / `You must install at least one postgresql-client-<version> package` | PostgreSQL never installed. Usually the Debian 12 commands were run on Debian 13: check `VERSION_CODENAME` and use the matching block in step 2. |
+| `type "vector" does not exist` | The pgvector package for your PostgreSQL version is missing: redo step 2 for your Debian release. |
 | `npm run build` killed / "JavaScript heap out of memory" | Give the container 4 GB RAM or add swap in Proxmox. |
 | No cards on the dashboard | Cards are dealt Mondays at 07:00 UTC. Check `journalctl -u thirtydates-worker`, or run the job by hand (above). |
 | A service fails with "Failed to set up mount namespacing" | Enable *Options → Features → nesting* for the container in Proxmox. |
