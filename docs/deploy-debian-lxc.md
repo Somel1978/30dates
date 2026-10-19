@@ -78,8 +78,17 @@ sudo apt install -y postgresql-common
 sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 sudo apt install -y postgresql-16 postgresql-16-postgis-3 postgresql-16-pgvector
 sudo systemctl enable --now postgresql
+```
+
+**Check before moving on.** Each command should succeed:
+
+```bash
+apt-cache policy postgresql-16 | head -3   # "Installed:" shows a version, not "(none)"
+pg_lsclusters                               # 16  main  5432  online …
 sudo -u postgres psql -c "SELECT version();"
 ```
+
+If `pg_lsclusters` shows the cluster as `down`, start it with `sudo pg_ctlcluster 16 main start`. If the `apt install` line printed errors, fix those first; nothing later works without PostgreSQL.
 
 ## 3. Node.js 22
 
@@ -110,7 +119,7 @@ No `sudo` here: the code belongs to you. Once the branch is merged, use `--branc
 
 ## 5. Database, role and extensions
 
-Generate a password for the app's database role and keep it for step 6:
+Generate a password for the app's database role and keep it for step 6. It only lives in this shell session, so if you log out before step 6, generate a new one and redo this step:
 
 ```bash
 DB_PASSWORD=$(openssl rand -hex 24); echo "$DB_PASSWORD"
@@ -326,6 +335,7 @@ Jobs are safe to repeat; a job that isn't due yet answers `409 job_not_due`.
 | `EACCES` writing uploads | `~/30dates-data/uploads` is missing or not owned by you: `mkdir -p ~/30dates-data/uploads`. |
 | Sign-in link works but you land back on sign-in | `WEB_ORIGIN` doesn't match the browser address, or you opened the link in a different browser. |
 | `403 Cross-origin request rejected` | Same: fix `WEB_ORIGIN`, then `sudo systemctl restart thirtydates-api`. |
+| `No existing cluster is suitable as a default target` / `You must install at least one postgresql-client-<version> package` | PostgreSQL never installed: step 2's `apt install` failed. Redo step 2 line by line and run its checks. |
 | `type "vector" does not exist` | pgvector isn't installed for PostgreSQL 16: redo step 2 using the PGDG repository. |
 | `npm run build` killed / "JavaScript heap out of memory" | Give the container 4 GB RAM or add swap in Proxmox. |
 | No cards on the dashboard | Cards are dealt Mondays at 07:00 UTC. Check `journalctl -u thirtydates-worker`, or run the job by hand (above). |
