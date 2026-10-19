@@ -5,6 +5,15 @@ import pg from 'pg';
 
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../db/migrations');
 
+/** Migration files not yet recorded in schema_migrations (all of them on an empty database). */
+export async function pendingMigrations(db: Pick<pg.Pool, 'query'>): Promise<string[]> {
+  const table = await db.query<{ t: string | null }>(`SELECT to_regclass('schema_migrations') AS t`);
+  const done = new Set(
+    table.rows[0]?.t ? (await db.query<{ name: string }>('SELECT name FROM schema_migrations')).rows.map((r) => r.name) : [],
+  );
+  return (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql') && !done.has(f)).sort();
+}
+
 export async function migrate(connectionString: string, log: (msg: string) => void = console.log): Promise<string[]> {
   const client = new pg.Client({ connectionString });
   await client.connect();

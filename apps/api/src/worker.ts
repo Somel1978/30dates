@@ -1,6 +1,7 @@
 import { Cron } from 'croner';
 import { JOB_NAMES, JOB_SCHEDULE, jobIsDue, runJob, type JobName } from './jobs.js';
 import { createContext } from './runtime.js';
+import { pendingMigrations } from './db/migrate.js';
 
 /**
  * Scheduler process. Runs every job on its UTC cron, guarded by a session-level advisory lock
@@ -8,6 +9,15 @@ import { createContext } from './runtime.js';
  * boundary that passed while no worker was running (all jobs are idempotent).
  */
 const ctx = createContext('worker');
+
+// Code and schema ship together: refuse to run against a database that misses a migration,
+// rather than answering every request that touches the new tables with a 500.
+const pending = await pendingMigrations(ctx.db);
+if (pending.length > 0) {
+  ctx.log.error({ pending }, 'database schema is behind this build: run `npm run db:migrate`, then restart');
+  await ctx.db.end();
+  process.exit(1);
+}
 
 async function execute(name: JobName): Promise<void> {
   const client = await ctx.db.connect();
