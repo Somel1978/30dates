@@ -15,7 +15,7 @@ import { assignStableBatches, type ScoredPair } from './galeShapley.js';
 
 export interface BatchRunSummary {
   batchWeek: string;
-  status: 'completed' | 'already_completed' | 'locked_elsewhere';
+  status: 'completed' | 'locked_elsewhere';
   usersConsidered: number;
   eligiblePairs: number;
   edgesAssigned: number;
@@ -162,30 +162,26 @@ async function loadCarryOvers(tx: Tx, batchWeek: string): Promise<CarryOver[]> {
   return rows.map((r) => ({ userId: r.user_id, cardUserId: r.frozen_user_id }));
 }
 
+/** Stage 3: capacitated Gale–Shapley over the scored pairs; `capacity` is each member's free slots. */
 export function stage3AssignBatches(
   poolUserIds: readonly string[],
   pairs: readonly ScoredPair[],
-  carries: ReadonlyMap<string, string>,
+  capacity: (userId: string) => number,
 ): Map<string, string[]> {
-  const { partners } = assignStableBatches({
-    users: poolUserIds,
-    pairs,
-    capacity: (u) => CARDS_PER_BATCH - (carries.has(u) ? 1 : 0),
-  });
-  return partners;
+  return assignStableBatches({ users: poolUserIds, pairs, capacity }).partners;
 }
 
+/**
+ * Deals (or tops up) a week's batches. The first run of a week is the Monday deal; later runs
+ * only fill members who are below six cards — late joiners and anyone left short — and never
+ * remove or replace a card already dealt. Re-running with nothing new is a no-op.
+ */
 export async function runMondayBatch(db: Db, batchWeek: string, topK: number): Promise<BatchRunSummary> {
   return withSystemTx(db, async (tx) => {
     const empty = { usersConsidered: 0, eligiblePairs: 0, edgesAssigned: 0, carriedCards: 0, shortfallUsers: 0 };
     const lock = await tx.query<{ ok: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext('monday_batch')) AS ok");
     if (!lock.rows[0]!.ok) return { batchWeek, status: 'locked_elsewhere', ...empty };
 
-    const prior = await tx.query<{ completed_at: Date | null }>(
-      'SELECT completed_at FROM batch_runs WHERE batch_week = $1',
-      [batchWeek],
-    );
-    if (prior.rows[0]?.completed_at) return { batchWeek, status: 'already_completed', ...empty };
     await tx.query(
       `INSERT INTO batch_runs (batch_week) VALUES ($1)
        ON CONFLICT (batch_week) DO UPDATE SET started_at = now()`,
@@ -194,28 +190,57 @@ export async function runMondayBatch(db: Db, batchWeek: string, topK: number): P
 
     const stage1 = await stage1FilterEligiblePairs(tx, batchWeek);
     const poolIds = (await tx.query<{ id: string }>('SELECT id FROM stage1_pool ORDER BY id')).rows.map((r) => r.id);
-    const carries = new Map((await loadCarryOvers(tx, batchWeek)).map((c) => [c.userId, c.cardUserId]));
+    const existing = new Map(
+      (
+        await tx.query<{ user_id: string; card_user_ids: string[] }>(
+          'SELECT user_id, card_user_ids FROM weekly_batches WHERE batch_week = $1',
+          [batchWeek],
+        )
+      ).rows.map((r) => [r.user_id, r.card_user_ids]),
+    );
+    // Carries apply when a member's batch is first created.
+    const carries = new Map(
+      (await loadCarryOvers(tx, batchWeek)).filter((c) => !existing.has(c.userId)).map((c) => [c.userId, c.cardUserId]),
+    );
     const scored = await stage2ScoreCandidates(tx, topK);
-    const assignment = stage3AssignBatches(poolIds, scored, carries);
+    const assignment = stage3AssignBatches(
+      poolIds,
+      scored,
+      (u) => CARDS_PER_BATCH - (existing.get(u)?.length ?? 0) - (carries.has(u) ? 1 : 0),
+    );
 
-    const rows: { user_id: string; cards: string[]; carried: string | null }[] = [];
+    const inserts: { user_id: string; cards: string[]; carried: string | null }[] = [];
+    const appends: { user_id: string; cards: string[] }[] = [];
     let edgeEndpoints = 0;
     let shortfallUsers = 0;
     for (const userId of poolIds) {
-      const assigned = assignment.get(userId) ?? [];
-      edgeEndpoints += assigned.length;
+      const added = assignment.get(userId) ?? [];
+      edgeEndpoints += added.length;
+      const held = existing.get(userId);
       const carried = carries.get(userId) ?? null;
-      const cards = carried ? [carried, ...assigned] : assigned;
-      if (cards.length < CARDS_PER_BATCH) shortfallUsers++;
-      if (cards.length > 0) rows.push({ user_id: userId, cards, carried });
+      const total = (held?.length ?? 0) + (carried ? 1 : 0) + added.length;
+      if (total < CARDS_PER_BATCH) shortfallUsers++;
+      if (held) {
+        if (added.length > 0) appends.push({ user_id: userId, cards: added });
+      } else if (carried || added.length > 0) {
+        inserts.push({ user_id: userId, cards: carried ? [carried, ...added] : added, carried });
+      }
     }
 
-    if (rows.length > 0) {
+    if (inserts.length > 0) {
       await tx.query(
         `INSERT INTO weekly_batches (user_id, batch_week, card_user_ids, carried_over_user_id)
          SELECT r.user_id, $1::date, r.cards, r.carried
            FROM jsonb_to_recordset($2::jsonb) AS r (user_id uuid, cards uuid[], carried uuid)`,
-        [batchWeek, JSON.stringify(rows)],
+        [batchWeek, JSON.stringify(inserts)],
+      );
+    }
+    if (appends.length > 0) {
+      await tx.query(
+        `UPDATE weekly_batches wb SET card_user_ids = wb.card_user_ids || r.cards
+           FROM jsonb_to_recordset($2::jsonb) AS r (user_id uuid, cards uuid[])
+          WHERE wb.user_id = r.user_id AND wb.batch_week = $1::date`,
+        [batchWeek, JSON.stringify(appends)],
       );
     }
 
@@ -230,8 +255,9 @@ export async function runMondayBatch(db: Db, batchWeek: string, topK: number): P
     };
     await tx.query(
       `UPDATE batch_runs
-          SET completed_at = now(), users_considered = $2, eligible_pairs = $3, edges_assigned = $4,
-              carried_cards = $5, shortfall_users = $6, stats = $7::jsonb
+          SET completed_at = now(), users_considered = $2, eligible_pairs = $3,
+              edges_assigned = coalesce(edges_assigned, 0) + $4,
+              carried_cards = coalesce(carried_cards, 0) + $5, shortfall_users = $6, stats = $7::jsonb
         WHERE batch_week = $1`,
       [
         batchWeek,

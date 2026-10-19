@@ -14,7 +14,7 @@ export function at(days: number, hh = 0, mm = 0): Date {
 }
 
 export interface TestContext extends AppContext {
-  setNow(d: Date): void;
+  setNow(d: Date | null): void;
   sent: MailMessage[];
 }
 
@@ -49,8 +49,8 @@ export function makeCtx(now: Date = at(0, 9)): TestContext {
     mailer: { send: async (m) => void sent.push(m) },
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     now: () => current,
-    setNow(d: Date) {
-      current = d;
+    setNow(d: Date | null) {
+      current = d ?? new Date();
     },
     sent,
   };

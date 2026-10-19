@@ -40,6 +40,36 @@ export interface OnboardingPayload {
   interests: { key: string; receipt: string }[];
 }
 
+/** The member's own answers (for editing) plus their card exactly as others see it. */
+export interface ProfileResponse {
+  first_name: string;
+  birth_date: string;
+  gender: Gender;
+  seeks: Seeks;
+  country_code: string;
+  postal_code: string;
+  search_radius_km: number;
+  time_zone: string;
+  gates: LifeArchitectureGates;
+  coin: { flaw: string; upside: string };
+  interests: { key: string; receipt: string }[];
+  paused: boolean;
+  preview: CardProfile;
+}
+
+export interface DevStatus {
+  real_now: string;
+  server_now: string;
+  clock_shifted: boolean;
+  phase: WeekPhase;
+  batch_week: string;
+  members: number;
+  my_cards: number;
+  stamped_me: number;
+  mutual: number;
+  matches: number;
+}
+
 export interface CardInterest {
   position: number;
   key: string;

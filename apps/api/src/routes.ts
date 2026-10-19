@@ -10,7 +10,8 @@ import { freezeCard, getCurrentBatch, unfreezeCard } from './services/batches.js
 import { acceptRaincheck, requestRaincheck, setBridgePreference } from './services/bridge.js';
 import { recordEscrowAction } from './services/escrow.js';
 import { getMatch, listMatches, listMessages, sendMessage } from './services/matches.js';
-import { completeOnboarding, getMe, onboardingSchema } from './services/onboarding.js';
+import { CLOCK_TARGETS, dealNow, devStatus, moveClock, requireDevTools, seedMembersAround, signalMe, stampMe } from './services/devTools.js';
+import { completeOnboarding, getMe, getProfile, onboardingSchema, setPaused } from './services/onboarding.js';
 import { addPhoto, deletePhoto, readPhoto } from './services/photos.js';
 import { answerScenario, getScenarioExchange } from './services/scenarios.js';
 import { submitSignal } from './services/signals.js';
@@ -60,6 +61,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     await deleteAccount(ctx, req.auth.userId);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.status(204).send();
+  });
+
+  app.get('/me/profile', member, async (req) => getProfile(ctx, req.auth.userId));
+
+  app.post('/me/pause', member, async (req) => {
+    const { paused } = parse(z.object({ paused: z.boolean() }), req.body);
+    await setPaused(ctx, req.auth.userId, paused);
+    return getProfile(ctx, req.auth.userId);
   });
 
   app.post('/onboarding', authed, async (req) => {
@@ -200,6 +209,35 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(201).send(await sendMessage(ctx, req.auth.userId, id, body));
     },
   );
+
+  // ------------------------------------------------------------------ test tools (development only)
+  if (ctx.config.NODE_ENV === 'development' && ctx.setNow) {
+    const dev = { preHandler: [app.requireOnboarded, async () => void requireDevTools(ctx)] };
+    app.get('/dev/status', dev, async (req) => devStatus(ctx, req.auth.userId));
+    app.post('/dev/seed', dev, async (req) => {
+      const { count } = parse(z.object({ count: z.number().int().min(1).max(60).optional() }), req.body ?? {});
+      await seedMembersAround(ctx, req.auth.userId, count ?? 24);
+      return devStatus(ctx, req.auth.userId);
+    });
+    app.post('/dev/deal', dev, async (req) => {
+      await dealNow(ctx);
+      return devStatus(ctx, req.auth.userId);
+    });
+    app.post('/dev/stamp-me', dev, async (req) => {
+      const { count } = parse(z.object({ count: z.number().int().min(1).max(6).optional() }), req.body ?? {});
+      await stampMe(ctx, req.auth.userId, count ?? 3);
+      return devStatus(ctx, req.auth.userId);
+    });
+    app.post('/dev/signal-me', dev, async (req) => {
+      await signalMe(ctx, req.auth.userId);
+      return devStatus(ctx, req.auth.userId);
+    });
+    app.post('/dev/clock', dev, async (req) => {
+      const { to } = parse(z.object({ to: z.enum(CLOCK_TARGETS) }), req.body);
+      await moveClock(ctx, to);
+      return devStatus(ctx, req.auth.userId);
+    });
+  }
 
   // ------------------------------------------------------------------ cron
   app.post('/cron/:job', cron, async (req) => {

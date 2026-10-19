@@ -14,11 +14,13 @@ import {
   isValidTimeZone,
   toPgVector,
   type MeResponse,
+  type ProfileResponse,
 } from '@thirtydates/shared';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { withUserTx } from '../db/pool.js';
 import { notFound, unprocessable } from '../lib/errors.js';
+import { loadCardProfiles } from './profiles.js';
 
 /** ~100 m precision (3 decimal places of a degree). */
 export function roundCoordinate(value: number): number {
@@ -104,11 +106,22 @@ export async function completeOnboarding(ctx: AppContext, userId: string, input:
         [input.country_code, input.postal_code],
       );
       const row = centroid.rows[0];
-      if (!row) {
-        throw unprocessable('location_unresolved', 'We could not place that postal code. Share your approximate location instead.');
+      if (row) {
+        lat = roundCoordinate(row.lat);
+        lng = roundCoordinate(row.lng);
+      } else {
+        // Editing a profile without re-sharing location: keep the stored point if the postal code is unchanged.
+        const current = await tx.query<{ lat: number; lng: number }>(
+          `SELECT ST_Y(coordinates) AS lat, ST_X(coordinates) AS lng FROM users
+            WHERE id = $1 AND coordinates IS NOT NULL AND postal_code = $2 AND country_code = $3`,
+          [userId, input.postal_code, input.country_code],
+        );
+        if (!current.rows[0]) {
+          throw unprocessable('location_unresolved', 'We could not place that postal code. Share your approximate location instead.');
+        }
+        lat = current.rows[0].lat;
+        lng = current.rows[0].lng;
       }
-      lat = roundCoordinate(row.lat);
-      lng = roundCoordinate(row.lng);
     }
 
     const updated = await tx.query(
@@ -188,4 +201,60 @@ export async function getMe(ctx: AppContext, userId: string): Promise<MeResponse
     time_zone: u.time_zone,
     photos: u.photos,
   };
+}
+
+export async function getProfile(ctx: AppContext, userId: string): Promise<ProfileResponse> {
+  return withUserTx(ctx.db, userId, async (tx) => {
+    const { rows } = await tx.query<
+      Omit<ProfileResponse, 'gates' | 'coin' | 'interests' | 'paused' | 'preview'> & {
+        family_goal: ProfileResponse['gates']['family_goal'];
+        living_architecture: ProfileResponse['gates']['living_architecture'];
+        mobility: ProfileResponse['gates']['mobility'];
+        financial_rhythm: ProfileResponse['gates']['financial_rhythm'];
+        flaw: string;
+        upside: string;
+        paused_at: Date | null;
+        interests: { key: string; receipt: string }[];
+      }
+    >(
+      `SELECT u.first_name, u.birth_date, u.gender, u.seeks, u.country_code, u.postal_code, u.search_radius_km,
+              u.time_zone, u.paused_at, g.family_goal, g.living_architecture, g.mobility, g.financial_rhythm,
+              c.flaw, c.upside,
+              coalesce((SELECT json_agg(json_build_object('key', bi.interest_key, 'receipt', bi.receipt) ORDER BY bi.position)
+                          FROM behavioral_interests bi WHERE bi.user_id = u.id), '[]') AS interests
+         FROM users u
+         JOIN life_architecture_gates g ON g.user_id = u.id
+         JOIN flaw_upside_coins c ON c.user_id = u.id
+        WHERE u.id = $1 AND u.onboarding_completed_at IS NOT NULL`,
+      [userId],
+    );
+    const r = rows[0];
+    if (!r) throw notFound('profile_not_found', 'Finish onboarding first');
+    const preview = (await loadCardProfiles(tx, userId, [userId])).get(userId)!;
+    return {
+      first_name: r.first_name,
+      birth_date: r.birth_date,
+      gender: r.gender,
+      seeks: r.seeks,
+      country_code: r.country_code.trim(),
+      postal_code: r.postal_code,
+      search_radius_km: r.search_radius_km,
+      time_zone: r.time_zone,
+      gates: {
+        family_goal: r.family_goal,
+        living_architecture: r.living_architecture,
+        mobility: r.mobility,
+        financial_rhythm: r.financial_rhythm,
+      },
+      coin: { flaw: r.flaw, upside: r.upside },
+      interests: r.interests,
+      paused: r.paused_at !== null,
+      preview,
+    };
+  });
+}
+
+/** Paused members keep their matches and chats but are left out of new deals. */
+export async function setPaused(ctx: AppContext, userId: string, paused: boolean): Promise<void> {
+  await ctx.db.query('UPDATE users SET paused_at = CASE WHEN $2 THEN coalesce(paused_at, now()) END WHERE id = $1', [userId, paused]);
 }

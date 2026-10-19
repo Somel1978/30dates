@@ -276,3 +276,15 @@ describe('Sunday #1 Signal', () => {
     expect((await ctx.db.query('SELECT 1 FROM matches')).rowCount).toBe(1);
   });
 });
+
+describe('member deletion', () => {
+  it('wipes the member’s live stakes instead of failing', async () => {
+    const a = await createMember(ctx);
+    const b = await createMember(ctx);
+    await dealPair(ctx, a, b);
+    await recordEscrowAction(ctx, a, b, stamp);
+    await ctx.db.query('DELETE FROM users WHERE id = $1', [b]);
+    const rows = await withSystemTx(ctx.db, async (tx) => (await tx.query('SELECT status, user_a_id, user_b_id FROM escrow_vault')).rows);
+    expect(rows).toEqual([{ status: 'wiped', user_a_id: null, user_b_id: null }]);
+  });
+});

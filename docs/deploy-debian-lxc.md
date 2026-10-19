@@ -216,9 +216,21 @@ ps -o user= -C node | sort -u                        # your username, not root
 
 If `journalctl` says you lack permission, add yourself to the log readers once with `sudo usermod -aG systemd-journal $USER`, then log out and back in. Until then, prefix `journalctl` with `sudo`.
 
-## 9. Optional: demo data
+## 9. Test it on your own: the Test tools page
 
-This creates 30 demo members, three partner venues and an onboarded account for your email, with this week's cards dealt and three of them already having stamped you:
+On a fresh install you're the only member, so the week is empty. With `NODE_ENV=development` (the LAN-testing setting), sign in, finish your profile, and open **Test tools** in the top menu. Its buttons walk the whole week in a few minutes:
+
+1. **Add 24**: creates members built to match *you* (nearby, inside your age window, the genders you seek, your life-architecture answers).
+2. **Monday**, then **Deal now**: your six cards appear on *This week*.
+3. **Stamp me ×3**: three cards silently stamp you. Stamp them back (hold a line on a card) to form mutual pairs.
+4. **Wednesday**: unlocks the scenario exchange on your mutual pairs.
+5. **Sunday 06:05**: runs the reveal; names unblur.
+6. **Sunday 18:05**: send your #1 Signal, then **Signal me**. You get a match, chat and the First-Meet Bridge.
+7. **Next Monday**: new week, new cards. **Real time** puts the clock back.
+
+The clock moves only inside the API process and resets when the API restarts. The page and its endpoints don't exist when `NODE_ENV=production`.
+
+The same seeding is available from the command line, for an account that has finished its profile:
 
 ```bash
 cd ~/30dates
@@ -226,7 +238,7 @@ set -a; . ./.env; set +a
 npm run seed:demo -w @thirtydates/api -- you@example.com
 ```
 
-Only do this on a test container; the seed refuses to run when `NODE_ENV=production`. If you seed before Monday 07:00 UTC, your cards stay hidden until then; that is the weekly ritual working as designed.
+Outside testing, members who join mid-week are dealt cards within the hour (until Saturday night), as other members become available.
 
 ---
 

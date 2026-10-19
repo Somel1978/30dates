@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useDevToolsAvailable } from '@/lib/devTools';
 
 type Mode = 'light' | 'dark';
 
@@ -42,20 +44,33 @@ function ThemeToggle() {
 }
 
 /** Calm, centred shell: a slim masthead and a single reading column. */
+const NAV_LINK = 'tap whitespace-nowrap rounded-full px-2 text-sm hover:text-ink sm:px-3';
+
+function NavLink({ href, children }: { href: string; children: ReactNode }) {
+  const path = usePathname();
+  const active = href === '/' ? path === '/' : path.startsWith(href);
+  return (
+    <Link href={href} aria-current={active ? 'page' : undefined} className={`${NAV_LINK} ${active ? 'text-ink' : 'text-muted'}`}>
+      {children}
+    </Link>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
+  const path = usePathname();
+  // Re-checked on navigation so the link appears right after signing in.
+  const devTools = useDevToolsAvailable(path);
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-4 pb-[env(safe-area-inset-bottom)] sm:px-8">
       <header className="flex items-center justify-between py-4">
         <Link href="/" className="tap -ml-2 rounded-full px-2 font-serif text-2xl tracking-tight">
           Thirty <span className="italic text-brass">Dates</span>
         </Link>
-        <nav aria-label="Primary" className="flex items-center">
-          <Link href="/" className="tap whitespace-nowrap rounded-full px-2 text-sm text-muted hover:text-ink sm:px-3">
-            This week
-          </Link>
-          <Link href="/matches" className="tap whitespace-nowrap rounded-full px-2 text-sm text-muted hover:text-ink sm:px-3">
-            Matches
-          </Link>
+        <nav aria-label="Primary" className="flex flex-wrap items-center justify-end">
+          <NavLink href="/">This week</NavLink>
+          <NavLink href="/matches">Matches</NavLink>
+          <NavLink href="/profile">Profile</NavLink>
+          {devTools && <NavLink href="/test">Test tools</NavLink>}
           <ThemeToggle />
         </nav>
       </header>

@@ -20,6 +20,7 @@ import { WeekBanner } from '@/components/WeekBanner';
 import { BottomSheet, Button, Notice, Panel, Spinner, WeeklyTable } from '@/components/primitives';
 import { ApiError, api, useResource } from '@/lib/api';
 import { formatDateTime, haptic } from '@/lib/format';
+import { useDevToolsAvailable } from '@/lib/devTools';
 import { useMemberSession } from '@/lib/session';
 
 type Confirm =
@@ -37,6 +38,7 @@ const BRIDGE_STATUS: Record<MatchSummary['status'], string> = {
 
 export default function WeeklyDashboard() {
   const session = useMemberSession();
+  const devTools = useDevToolsAvailable();
   const batch = useResource<CurrentBatchResponse>(session.ready ? '/batches/current' : null, 60_000);
   const matches = useResource<MatchSummary[]>(session.ready ? '/matches' : null, 120_000);
 
@@ -241,12 +243,21 @@ export default function WeeklyDashboard() {
         </div>
       ) : (
         <Panel className="p-8 text-center">
-          <h2 className="text-2xl">{data.phase === 'awaiting_deal' ? 'Your table is being set' : 'A quiet week'}</h2>
+          <h2 className="text-2xl">
+            {data.phase === 'awaiting_deal' ? 'Your table is being set' : interactive ? 'No introductions yet' : 'This week’s table is closed'}
+          </h2>
           <p className="mx-auto mt-2 max-w-md text-muted">
             {data.phase === 'awaiting_deal'
               ? 'Six faceless introductions arrive Monday at 07:00 UTC.'
-              : 'No one new in your radius and window this week. Your introductions resume next Monday.'}
+              : interactive
+                ? 'Nobody in your radius and age window is free to be dealt yet. We check every hour until Saturday night, and new cards appear here as members join.'
+                : 'Stamps are closed for this week. Your next introductions arrive Monday at 07:00 UTC.'}
           </p>
+          {devTools && (
+            <Link href="/test" className="tap mt-5 rounded-full bg-accent px-6 text-sm font-medium text-canvas">
+              Open test tools
+            </Link>
+          )}
         </Panel>
       )}
 

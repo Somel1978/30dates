@@ -31,7 +31,7 @@ export function Button({
       disabled={props.disabled || busy}
       aria-busy={busy || undefined}
       className={cx(
-        'tap gap-2 rounded-full px-6 text-sm font-medium transition-colors duration-200 ease-calm disabled:cursor-not-allowed',
+        'tap gap-2 whitespace-nowrap rounded-full px-6 text-sm font-medium transition-colors duration-200 ease-calm disabled:cursor-not-allowed',
         buttonStyles[variant],
         className,
       )}

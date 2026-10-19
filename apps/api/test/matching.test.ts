@@ -164,13 +164,36 @@ describe('Monday batch run', () => {
     }
   });
 
-  it('is idempotent for a week', async () => {
+  it('is safe to re-run: nothing new means nothing changes', async () => {
     await seedPool(8);
     await runMondayBatch(ctx.db, TEST_WEEK, 24);
+    const before = (await ctx.db.query('SELECT user_id, card_user_ids FROM weekly_batches ORDER BY user_id')).rows;
     const again = await runMondayBatch(ctx.db, TEST_WEEK, 24);
-    expect(again.status).toBe('already_completed');
-    const { rows } = await ctx.db.query<{ n: number }>('SELECT count(*)::int AS n FROM weekly_batches');
-    expect(rows[0]!.n).toBe(8);
+    expect(again.edgesAssigned).toBe(0);
+    const after = (await ctx.db.query('SELECT user_id, card_user_ids FROM weekly_batches ORDER BY user_id')).rows;
+    expect(after).toEqual(before);
+  });
+
+  it('tops up late joiners mid-week without touching cards already dealt', async () => {
+    // Five members can only fill four cards each, leaving spare capacity.
+    const early = await seedPool(5);
+    await runMondayBatch(ctx.db, TEST_WEEK, 24);
+    const dealt = new Map<string, string[]>();
+    for (const id of early) dealt.set(id, await batchOf(id));
+
+    const late = await createMember(ctx, { age: 39, gender: 'woman', seeks: 'everyone', lat: 51.5, lng: -0.12 });
+    expect(await batchOf(late)).toEqual([]);
+    const summary = await runMondayBatch(ctx.db, TEST_WEEK, 24);
+    expect(summary.edgesAssigned).toBeGreaterThan(0);
+
+    const lateCards = await batchOf(late);
+    expect(lateCards.length).toBeGreaterThan(0);
+    for (const id of early) {
+      const now = await batchOf(id);
+      expect(now.slice(0, dealt.get(id)!.length)).toEqual(dealt.get(id));
+      expect(now.length).toBeLessThanOrEqual(6);
+      if (lateCards.includes(id)) expect(now).toContain(late);
+    }
   });
 
   it('carries a frozen card into the freezer’s next batch only', async () => {

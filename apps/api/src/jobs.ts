@@ -6,12 +6,14 @@ import { runSundayReveal } from './services/escrow.js';
 import { purgeClosedSignals } from './services/signals.js';
 import { conflict } from './lib/errors.js';
 
-export const JOB_NAMES = ['monday-deal', 'sunday-reveal', 'signal-close', 'bridge-maintenance', 'aged-out-sweep'] as const;
+export const JOB_NAMES = ['monday-deal', 'late-deal', 'sunday-reveal', 'signal-close', 'bridge-maintenance', 'aged-out-sweep'] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 
 /** UTC cron schedule for each job (minute hour day-of-month month day-of-week). */
 export const JOB_SCHEDULE: Record<JobName, string> = {
   'monday-deal': '0 7 * * 1',
+  // Tops up late joiners and anyone short of six cards, hourly while stamps are open.
+  'late-deal': '20 * * * *',
   'sunday-reveal': '0 6 * * 0',
   'signal-close': '0 0 * * 1',
   'bridge-maintenance': '*/5 * * * *',
@@ -27,7 +29,9 @@ export function jobIsDue(name: JobName, now: Date): boolean {
   const clock = weekClock(now);
   switch (name) {
     case 'monday-deal':
-      return clock.phase !== 'awaiting_deal';
+    case 'late-deal':
+      // Cards are only dealt while stamps are open, never after Saturday night.
+      return clock.phase === 'validation';
     case 'sunday-reveal':
       return clock.phase === 'reveal' || clock.phase === 'signal';
     default:
@@ -42,7 +46,7 @@ export function jobIsDue(name: JobName, now: Date): boolean {
 export async function runJob(ctx: AppContext, name: JobName): Promise<unknown> {
   const now = ctx.now();
   const clock = weekClock(now);
-  const runKey = name === 'bridge-maintenance' ? now.toISOString().slice(0, 16) : clock.batchWeek;
+  const runKey = name === 'bridge-maintenance' || name === 'late-deal' ? now.toISOString().slice(0, 16) : clock.batchWeek;
   if (!jobIsDue(name, now)) throw conflict('job_not_due', `${name} is not due yet for week ${clock.batchWeek}`);
 
   await ctx.db.query(
@@ -54,6 +58,7 @@ export async function runJob(ctx: AppContext, name: JobName): Promise<unknown> {
   let result: unknown;
   switch (name) {
     case 'monday-deal':
+    case 'late-deal':
       result = await runMondayBatch(ctx.db, clock.batchWeek, ctx.config.MATCHING_TOP_K);
       break;
     case 'sunday-reveal':

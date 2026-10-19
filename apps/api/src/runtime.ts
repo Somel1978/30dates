@@ -11,21 +11,28 @@ export function consoleLogger(name: string): Logger {
   return { info: write('info'), warn: write('warn'), error: write('error') };
 }
 
-function clock(override: string | undefined): () => Date {
-  if (!override) return () => new Date();
-  const offset = Date.parse(override) - Date.now();
-  return () => new Date(Date.now() + offset);
+/** Real time, optionally shifted. The shift can be moved at runtime in development (test tools). */
+function clock(override: string | undefined) {
+  let offset = override ? Date.parse(override) - Date.now() : 0;
+  return {
+    now: () => new Date(Date.now() + offset),
+    set: (instant: Date | null) => {
+      offset = instant ? instant.getTime() - Date.now() : 0;
+    },
+  };
 }
 
 export function createContext(name: string): AppContext {
   const config = loadConfig();
   const log = consoleLogger(name);
   if (config.CLOCK_OVERRIDE) log.warn({ clock: config.CLOCK_OVERRIDE }, 'service clock overridden (development)');
+  const serviceClock = clock(config.CLOCK_OVERRIDE);
   return {
     config,
     db: createPool(config.DATABASE_URL),
     mailer: createMailer(config.SMTP_URL, config.MAIL_FROM, log),
     log,
-    now: clock(config.CLOCK_OVERRIDE),
+    now: serviceClock.now,
+    ...(config.NODE_ENV === 'development' ? { setNow: serviceClock.set } : {}),
   };
 }

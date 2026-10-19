@@ -15,4 +15,6 @@ export interface AppContext {
   mailer: Mailer;
   log: Logger;
   now: () => Date;
+  /** Development only: move the service clock (null returns to real time). Absent in production. */
+  setNow?: (instant: Date | null) => void;
 }
