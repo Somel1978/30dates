@@ -35,28 +35,12 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#0F1115' },
-    { media: '(prefers-color-scheme: light)', color: '#F8F7F4' },
-  ],
+  themeColor: '#0D1616',
 };
-
-/** Applies the stored or system theme before first paint to avoid a flash. */
-const themeScript = `(() => {
-  let mode = null;
-  try { mode = localStorage.getItem('td-theme'); } catch {}
-  if (mode !== 'light' && mode !== 'dark') {
-    mode = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  }
-  document.documentElement.classList.toggle('dark', mode === 'dark');
-})();`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`dark ${serif.variable} ${sans.variable}`} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
+    <html lang="en" className={`dark ${serif.variable} ${sans.variable}`}>
       <body>
         <AppShell>{children}</AppShell>
       </body>

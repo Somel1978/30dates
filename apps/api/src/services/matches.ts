@@ -104,7 +104,7 @@ async function summarise(tx: Tx, matches: MatchRow[], viewerId: string): Promise
   const events = await loadEvents(tx, matches.map((m) => m.id), viewerId);
   return matches.map((m, i) => {
     const counterpartId = counterpartIds[i]!;
-    const identity = identities.get(counterpartId) ?? { first_name: '', photo_ids: [] };
+    const identity = identities.get(counterpartId) ?? { first_name: '', age: 0, photo_ids: [] };
     return {
       id: m.id,
       status: m.status,

@@ -25,17 +25,17 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="mx-auto max-w-md pt-10">
-      <p className="eyebrow">Members aged 30–55</p>
-      <h1 className="mt-2 text-4xl">Six introductions. Every Monday. No feeds.</h1>
-      <p className="mt-4 text-muted">
-        No swiping and no “likes you” lists. Interest stays sealed until it’s mutual.
-      </p>
+    <div className="pt-8">
+      <div className="text-center">
+        <p className="text-sm font-medium text-brass">For members aged 30–55</p>
+        <h1 className="mt-3 text-[2rem] leading-tight">Six introductions.<br />Every Monday.</h1>
+        <p className="mx-auto mt-3 max-w-xs text-muted">No swiping, no feeds, no “likes you” lists. Character first; faces when it’s mutual.</p>
+      </div>
 
-      <Panel className="mt-8 p-6">
+      <Panel className="mt-8 p-5">
         {sent ? (
           <div role="status">
-            <h2 className="text-2xl">Check your inbox</h2>
+            <h2 className="text-xl">Check your inbox</h2>
             <p className="mt-2 text-muted">
               If <span className="text-ink">{email}</span> can sign in, a link is on its way. It works once and expires in 15 minutes.
             </p>
@@ -45,7 +45,7 @@ export default function SignInPage() {
           </div>
         ) : (
           <form onSubmit={submit} noValidate>
-            <label htmlFor="email" className="eyebrow">
+            <label htmlFor="email" className="text-sm font-medium">
               Email
             </label>
             <input
@@ -56,7 +56,7 @@ export default function SignInPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-2 min-h-touch w-full rounded-xl border border-line bg-canvas px-4 text-base outline-none focus:border-brass"
+              className="mt-2 min-h-touch w-full rounded-xl border border-line bg-raised px-4 text-base outline-none focus:border-brass"
             />
             <Button type="submit" className="mt-5 w-full" busy={busy} disabled={!email.includes('@')}>
               Email me a sign-in link

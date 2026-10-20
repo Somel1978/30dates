@@ -2,16 +2,17 @@
 
 import type { MatchSummary } from '@thirtydates/shared';
 import Link from 'next/link';
-import { Badge, Notice, Panel, Spinner } from '@/components/primitives';
+import { ChevronRight } from '@/components/icons';
+import { Notice, Panel, ScreenHeader, Spinner } from '@/components/primitives';
 import { useResource } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useMemberSession } from '@/lib/session';
 
 const STATUS: Record<MatchSummary['status'], string> = {
-  bridging: 'Choosing how to meet',
+  bridging: 'Propose a meet-up',
   scheduled: 'Meeting scheduled',
   raincheck_pending: 'Raincheck pending',
-  met: 'Met',
+  met: 'You’ve met',
   expired: 'Closed',
 };
 
@@ -22,23 +23,40 @@ export default function MatchesPage() {
   if (!matches.data) return matches.error ? <Notice tone="error">{matches.error.message}</Notice> : <Spinner />;
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <h1 className="text-4xl">Matches</h1>
-      <p className="mt-2 text-muted">Formed the moment you both lock your voice answers.</p>
+    <div>
+      <ScreenHeader title="Matches" subtitle="Made the moment you’ve both answered by voice." />
       {matches.data.length === 0 ? (
-        <Panel className="mt-8 p-8 text-center">
-          <p className="text-muted">No matches yet. They’re rare on purpose.</p>
+        <Panel className="p-6 text-center">
+          <p className="font-medium">No matches yet</p>
+          <p className="mt-1 text-sm text-muted">They’re rare on purpose. Each one starts with a Monday batch.</p>
         </Panel>
       ) : (
-        <ul role="list" className="mt-8 space-y-3">
+        <ul role="list" className="space-y-2.5">
           {matches.data.map((m) => (
             <li key={m.id}>
-              <Link href={`/matches/${m.id}`} className="block rounded-card border border-line/70 bg-panel p-5 shadow-card transition-colors hover:border-brass/50">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-serif text-2xl">{m.counterpart.first_name}</span>
-                  <Badge tone={m.status === 'expired' ? 'default' : 'brass'}>{STATUS[m.status]}</Badge>
-                </div>
-                {m.event && m.status !== 'expired' && <p className="mt-1 text-sm text-muted">{formatDateTime(m.event.starts_at)}</p>}
+              <Link
+                href={`/matches/${m.id}`}
+                className={`flex min-h-[4.5rem] items-center gap-3.5 rounded-2xl border bg-panel px-4 py-3 shadow-card ${
+                  m.status === 'expired' ? 'border-line opacity-60' : 'border-brass/50'
+                }`}
+              >
+                {m.counterpart.photo_ids[0] ? (
+                  // Plain img: the authenticated, private photo endpoint.
+                  <img src={`/api/photos/${m.counterpart.photo_ids[0]}`} alt="" className="h-12 w-12 rounded-full object-cover" />
+                ) : (
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pine text-lg font-semibold" aria-hidden="true">
+                    {m.counterpart.first_name.slice(0, 1)}
+                  </span>
+                )}
+                <span className="flex-1">
+                  <span className="block font-medium">
+                    {m.counterpart.first_name}, {m.counterpart.age}
+                  </span>
+                  <span className="block text-[0.8125rem] text-muted">
+                    {m.event && m.status === 'scheduled' ? `Meeting ${formatDateTime(m.event.starts_at)}` : STATUS[m.status]}
+                  </span>
+                </span>
+                <ChevronRight size={18} className="text-muted" />
               </Link>
             </li>
           ))}

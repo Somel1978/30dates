@@ -4,6 +4,7 @@ import type {
   LifeArchitectureGates,
   Seeks,
 } from './domain.js';
+import type { PromptVector } from './prompts.js';
 import type { WeekPhase } from './week.js';
 
 /** Wire contracts shared by the API and the web client. Dates are ISO-8601 UTC strings. */
@@ -102,14 +103,14 @@ export interface ExchangeSummary {
   questions_close_at: string;
   answers_close_at: string;
   /** Set the instant both have locked: the simultaneous modality switch. */
-  revealed: { first_name: string; photo_ids: string[] } | null;
+  revealed: { first_name: string; age: number; photo_ids: string[] } | null;
   match_id: string | null;
 }
 
 export interface ExchangeDetail extends ExchangeSummary {
   server_now: string;
   /** The bank to pick from (while picking questions). */
-  prompt_bank: { key: string; text: string }[];
+  prompt_bank: { key: string; vector: PromptVector; text: string }[];
   /** Questions I chose for them. */
   my_picks: string[];
   /** Questions they chose for me; visible once the Response Clock starts. */
@@ -177,7 +178,7 @@ export interface MatchSummary {
   status: 'bridging' | 'scheduled' | 'raincheck_pending' | 'met' | 'expired';
   time_zone: string;
   created_at: string;
-  counterpart: { user_id: string; first_name: string; photo_ids: string[] };
+  counterpart: { user_id: string; first_name: string; age: number; photo_ids: string[] };
   event: BridgeEventDto | null;
 }
 

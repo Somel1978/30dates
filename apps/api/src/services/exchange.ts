@@ -157,7 +157,7 @@ export async function getExchange(ctx: AppContext, userId: string, exchangeId: s
     return {
       ...summary!,
       server_now: ctx.now().toISOString(),
-      prompt_bank: x.status === 'questions' ? VOICE_PROMPTS.map((p) => ({ key: p.key, text: p.text })) : [],
+      prompt_bank: x.status === 'questions' ? VOICE_PROMPTS.map((p) => ({ key: p.key, vector: p.vector, text: p.text })) : [],
       my_picks: myPicks,
       questions_for_me: theirPicks.map((key) => ({ key, text: text(key) })),
       my_answers: answers.rows
@@ -361,8 +361,12 @@ export async function runExchangeTick(ctx: AppContext): Promise<TickSummary> {
     for (const x of starting.rows) {
       for (const picker of [x.user_a_id, x.user_b_id]) {
         if ((await picksBy(tx, x.id, picker)).length > 0) continue;
-        const start = fnv1a(`${x.id}:${picker}`) % VOICE_PROMPTS.length;
-        const keys = [0, 1].map((i) => VOICE_PROMPTS[(start + i) % VOICE_PROMPTS.length]!.key);
+        // One everyday-rhythm question and one joy question, chosen deterministically.
+        const seed = fnv1a(`${x.id}:${picker}`);
+        const keys = (['rhythm', 'joy'] as const).map((v) => {
+          const bank = VOICE_PROMPTS.filter((p) => p.vector === v);
+          return bank[seed % bank.length]!.key;
+        });
         await tx.query(
           `INSERT INTO voice_prompt_picks (exchange_id, picker_id, position, prompt_key)
            SELECT $1, $2, ord, key FROM unnest($3::text[]) WITH ORDINALITY AS t (key, ord)`,

@@ -63,7 +63,7 @@ export function EventPanel({ match, onUpdated }: { match: MatchDetail; onUpdated
   return (
     <Panel className="p-6">
       <p className="eyebrow">{event.status === 'completed' ? 'You met' : 'Locked in'}</p>
-      <h2 className="mt-1 text-2xl">{BRIDGE_MODE_META[event.mode].title}</h2>
+      <h2 className="mt-1 text-xl">{BRIDGE_MODE_META[event.mode].title}</h2>
       <p className="mt-1 text-lg">{formatDateTime(event.starts_at)}</p>
       {event.venue && (
         <p className="mt-1 text-muted">

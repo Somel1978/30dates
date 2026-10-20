@@ -31,21 +31,27 @@ export default function MatchPage() {
   const closed = match.status === 'expired';
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <header className="flex items-center gap-4">
+    <div className="space-y-5">
+      <header className="text-center">
+        <h1 className="text-[1.75rem] leading-tight">{match.status === 'bridging' ? 'It’s a Match!' : match.counterpart.first_name}</h1>
+        <p className="text-lg font-semibold text-brass">
+          {match.status === 'bridging' ? 'Your photos are unblurred' : match.status === 'scheduled' ? 'You’re meeting' : 'Your match'}
+        </p>
+      </header>
+
+      <div className="relative mx-auto aspect-[4/5] w-full max-w-[18rem] overflow-hidden rounded-2xl border border-line bg-raised shadow-card">
         {photo ? (
           // Plain img: the authenticated, private photo endpoint.
-          <img src={`/api/photos/${photo}`} alt={`Photo of ${match.counterpart.first_name}`} className="h-20 w-20 rounded-full object-cover ring-2 ring-brass/50" />
+          <img src={`/api/photos/${photo}`} alt={`Photo of ${match.counterpart.first_name}`} className="h-full w-full object-cover" />
         ) : (
-          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-forest font-serif text-3xl ring-2 ring-brass/50" aria-hidden="true">
+          <span className="flex h-full w-full items-center justify-center text-6xl font-semibold text-brass/70" aria-hidden="true">
             {match.counterpart.first_name.slice(0, 1)}
           </span>
         )}
-        <div>
-          <p className="eyebrow text-brass">It’s mutual</p>
-          <h1 className="text-4xl">{match.counterpart.first_name}</h1>
-        </div>
-      </header>
+        <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-12 text-lg font-semibold">
+          {match.counterpart.first_name}, {match.counterpart.age}
+        </span>
+      </div>
 
       {closed && <Notice>This match has closed. No one was told why — and nothing was your fault.</Notice>}
 
@@ -55,7 +61,7 @@ export default function MatchPage() {
       <ChatThread matchId={match.id} closed={closed} partnerName={match.counterpart.first_name} />
 
       {!closed && (
-        <div className="text-right">
+        <div className="text-center">
           <Button variant="ghost" onClick={() => setBlocking(true)}>
             Block and close
           </Button>
@@ -63,12 +69,13 @@ export default function MatchPage() {
       )}
 
       <BottomSheet open={blocking} title={`Block ${match.counterpart.first_name}?`} onClose={() => setBlocking(false)}>
-        <p className="text-muted">The match closes, any meeting is cancelled, and you will never be introduced again.</p>
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setBlocking(false)}>
+        <p className="text-sm text-ink/80">The match closes, any meeting is cancelled, and you will never be introduced again.</p>
+        <div className="mt-5 flex flex-col gap-2">
+          <Button variant="ghost" className="order-2" onClick={() => setBlocking(false)}>
             Cancel
           </Button>
           <Button
+            className="order-1"
             onClick={async () => {
               await api('/blocks', { method: 'POST', body: { target_user_id: match.counterpart.user_id } });
               router.replace('/matches');

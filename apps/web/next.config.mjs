@@ -4,6 +4,8 @@ const apiOrigin = process.env.API_ORIGIN ?? 'http://localhost:4000';
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The dev badge sits over the bottom tab bar.
+  devIndicators: false,
   transpilePackages: ['@thirtydates/shared'],
   // Same-origin API: the session cookie stays first-party and SameSite=Lax applies.
   async rewrites() {

@@ -2,32 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Semantic colour tokens (RGB triplets). Light editorial mode is bone paper with ink;
-   dark mode is the default deep-charcoal lounge. */
+/* Semantic colour tokens (RGB triplets). One look: a deep forest-charcoal lounge with
+   antique-gold accents, built for a phone held in one hand. */
 :root {
-  --color-canvas: 248 247 244; /* #F8F7F4 bone */
-  --color-panel: 255 255 255;
-  --color-raised: 240 237 231;
-  --color-ink: 27 30 36;
-  --color-muted: 98 102 110;
-  --color-line: 221 216 207;
-  --color-accent: 169 87 62; /* terracotta deep: AA contrast on bone */
-  --color-brass: 138 112 34;
-  --glow: radial-gradient(ellipse 90% 50% at 50% -10%, rgb(212 175 55 / 0.10), transparent 70%);
-  color-scheme: light;
-}
-
-.dark {
-  --color-canvas: 15 17 21; /* #0F1115 */
-  --color-panel: 18 22 31; /* #12161F */
-  --color-raised: 26 31 42;
-  --color-ink: 236 232 224;
-  --color-muted: 156 160 168;
-  --color-line: 42 48 60;
-  --color-accent: 200 109 81; /* #C86D51 */
-  --color-brass: 212 175 55; /* #D4AF37 */
-  /* Low lamplight over the lounge table. */
-  --glow: radial-gradient(ellipse 90% 50% at 50% -10%, rgb(42 59 60 / 0.55), transparent 70%);
+  --color-canvas: 13 22 22; /* #0D1616 */
+  --color-panel: 24 37 37; /* #182525 */
+  --color-raised: 32 48 47; /* #20302F */
+  --color-ink: 241 237 228;
+  --color-muted: 154 166 162;
+  --color-line: 50 68 66; /* #324442 */
+  --color-accent: 200 109 81; /* terracotta: errors and warnings only */
+  --color-brass: 216 182 98; /* #D8B662 antique gold */
+  --color-forest: 42 59 60; /* #2A3B3C */
   color-scheme: dark;
 }
 
@@ -35,23 +21,24 @@
   html {
     -webkit-text-size-adjust: 100%;
     text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     @apply bg-canvas font-sans text-base text-ink antialiased;
     min-height: 100dvh;
-    background-image: var(--glow);
+    background-image: radial-gradient(ellipse 120% 60% at 50% -10%, rgb(42 66 64 / 0.75), transparent 70%);
     background-repeat: no-repeat;
   }
   h1,
   h2,
   h3 {
-    @apply font-serif font-medium tracking-tight;
+    @apply font-sans font-semibold tracking-tight;
   }
   :focus-visible {
     @apply outline-none ring-2 ring-brass ring-offset-2 ring-offset-canvas;
   }
   ::selection {
-    @apply bg-accent/30;
+    @apply bg-brass/30;
   }
 }
 
@@ -60,12 +47,16 @@
   .tap {
     @apply inline-flex min-h-touch min-w-touch items-center justify-center;
   }
-  /* Small, quiet captions: an italic serif aside, never a shouty uppercase label. */
   .eyebrow {
-    @apply font-serif text-base italic text-muted;
+    @apply text-sm text-muted;
   }
-  .hairline {
-    @apply border-line/70;
+  /* The gold call to action from the design. */
+  .btn-gold {
+    @apply bg-gradient-to-b from-[#E9CD82] to-[#C49A42] font-semibold text-[#1B1A12] shadow-[0_6px_20px_-8px_rgb(216_182_98/0.6)];
+  }
+  .no-callout {
+    -webkit-touch-callout: none;
+    user-select: none;
   }
 }
 

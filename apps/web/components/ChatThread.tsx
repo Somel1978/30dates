@@ -42,7 +42,9 @@ export function ChatThread({ matchId, closed, partnerName }: { matchId: string; 
   }, [poll]);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'end' });
+    // Scroll the thread itself, never the page (it sits below the meet-up on a phone).
+    const list = bottom.current?.parentElement;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages.length]);
 
   const send = async (e: FormEvent) => {
@@ -69,7 +71,7 @@ export function ChatThread({ matchId, closed, partnerName }: { matchId: string; 
         {messages.length === 0 && <p className="text-center text-sm text-muted">Say hello. No rush.</p>}
         {messages.map((m) => (
           <div key={m.id} className={cx('flex', m.sender_is_me ? 'justify-end' : 'justify-start')}>
-            <div className={cx('max-w-[80%] rounded-2xl px-4 py-2', m.sender_is_me ? 'bg-accent/15' : 'bg-raised')}>
+            <div className={cx('max-w-[80%] rounded-2xl px-4 py-2', m.sender_is_me ? 'bg-brass/15' : 'bg-raised')}>
               <p className="whitespace-pre-wrap break-words">{m.body}</p>
               <p className="mt-0.5 text-right text-[0.7rem] text-muted">{formatTime(m.created_at)}</p>
             </div>
@@ -90,7 +92,7 @@ export function ChatThread({ matchId, closed, partnerName }: { matchId: string; 
             maxLength={2000}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="min-h-touch flex-1 resize-none rounded-2xl border border-line bg-canvas px-4 py-3 text-base outline-none focus:border-brass"
+            className="min-h-touch flex-1 resize-none rounded-xl border border-line bg-raised px-4 py-3 text-base outline-none focus:border-brass"
           />
           <Button type="submit" busy={busy} disabled={!draft.trim()}>
             Send

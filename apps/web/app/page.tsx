@@ -1,60 +1,100 @@
 'use client';
 
-import type { BatchCard, CurrentBatchResponse, MatchSummary } from '@thirtydates/shared';
+import type { BatchCard, CurrentBatchResponse, ExchangeSummary, MatchSummary } from '@thirtydates/shared';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ExchangeCard } from '@/components/ExchangeCard';
+import { Countdown } from '@/components/Countdown';
 import { FreezeVault } from '@/components/FreezeVault';
-import { MondayCard } from '@/components/MondayCard';
-import { WeekBanner } from '@/components/WeekBanner';
-import { BottomSheet, Button, Notice, Panel, Spinner, WeeklyTable } from '@/components/primitives';
+import { ChevronRight, Snowflake } from '@/components/icons';
+import { BlurredAvatar, CardBody, CardTile } from '@/components/MondayCard';
+import { BottomSheet, Button, Notice, Panel, ScreenHeader, Spinner } from '@/components/primitives';
 import { ApiError, api, useResource } from '@/lib/api';
 import { useDevToolsAvailable } from '@/lib/devTools';
 import { formatDateTime, haptic } from '@/lib/format';
 import { useMemberSession } from '@/lib/session';
 
-type Confirm = { kind: 'select' | 'freeze'; card: BatchCard };
+const HOLD_MS = 350;
 
 const MATCH_STATUS: Record<MatchSummary['status'], string> = {
-  bridging: 'Choose a time for coffee or wine',
+  bridging: 'Propose a meet-up',
   scheduled: 'You’re meeting',
   raincheck_pending: 'A new time has been proposed',
   met: 'You’ve met',
   expired: 'Closed',
 };
 
-const CONFIRM_COPY: Record<Confirm['kind'], { title: string; body: string; action: string }> = {
-  select: {
-    title: 'Hear from this person?',
-    body: 'This stays sealed. They’ll never know unless they chose you too, and if they did, you’ll trade a few questions by voice on Wednesday.',
-    action: 'Yes, I’d like that',
-  },
-  freeze: {
-    title: 'Keep them for next week?',
-    body: 'Not ready to decide? Use your one Freeze for the week and this person will be at your table again next Monday.',
-    action: 'Keep for next week',
-  },
+const EXCHANGE_STATUS: Record<ExchangeSummary['status'], string> = {
+  questions: 'Choose your questions',
+  answering: 'Answer in your voice',
+  released: 'It’s a match',
+  expired: 'Closed quietly',
 };
 
-export default function WeeklyTablePage() {
+function ExchangeRow({ x, serverNow }: { x: ExchangeSummary; serverNow: string }) {
+  const photo = x.revealed?.photo_ids[0];
+  let detail: React.ReactNode;
+  if (x.status === 'questions') detail = x.my_pick_count ? `${x.my_pick_count} questions chosen` : 'Pick 2–3 questions for them';
+  else if (x.status === 'answering')
+    detail = x.i_locked ? 'Sent · waiting for theirs' : <><Countdown to={x.answers_close_at} serverNow={serverNow} /> left to answer</>;
+  else if (x.status === 'released') detail = 'Your photos are unblurred';
+  else detail = 'Time ran out; nothing was shared';
+  const href = x.status === 'released' && x.match_id ? `/matches/${x.match_id}` : `/exchanges/${x.id}`;
+
+  return (
+    <li>
+      <Link
+        href={href}
+        aria-disabled={x.status === 'expired'}
+        className={`flex min-h-[4.5rem] items-center gap-3.5 rounded-2xl border bg-panel px-4 py-3 shadow-card ${
+          x.status === 'expired' ? 'pointer-events-none border-line opacity-50' : x.status === 'released' ? 'border-brass/70' : 'border-line'
+        }`}
+      >
+        {x.revealed ? (
+          photo ? (
+            // Plain img: the authenticated, private photo endpoint.
+            <img src={`/api/photos/${photo}`} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-brass/60" />
+          ) : (
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pine text-lg font-semibold ring-2 ring-brass/60">
+              {x.revealed.first_name.slice(0, 1)}
+            </span>
+          )
+        ) : (
+          <BlurredAvatar size={48} />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium text-brass">{EXCHANGE_STATUS[x.status]}</span>
+          <span className="block truncate font-medium">
+            {x.revealed ? `${x.revealed.first_name}, ${x.revealed.age}` : x.counterpart.interests.map((i) => i.label).join(' · ')}
+          </span>
+          <span className="block text-[0.8125rem] text-muted">{detail}</span>
+        </span>
+        <ChevronRight size={18} className="text-muted" />
+      </Link>
+    </li>
+  );
+}
+
+export default function MondayBatchPage() {
   const session = useMemberSession();
   const devTools = useDevToolsAvailable();
   const batch = useResource<CurrentBatchResponse>(session.ready ? '/batches/current' : null, 60_000);
   const matches = useResource<MatchSummary[]>(session.ready ? '/matches' : null, 120_000);
 
-  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [detail, setDetail] = useState<BatchCard | null>(null);
+  const [vaultOpen, setVaultOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'muted' | 'error'; text: string } | null>(null);
 
-  // Pointer-driven drag to the Freeze Vault (HTML5 drag-and-drop does not work on touch).
-  const vaultRef = useRef<HTMLDivElement>(null);
+  // Press-and-hold drag into the Freeze Vault. Holding still for HOLD_MS arms the drag; moving
+  // earlier is treated as a scroll, so the grid still scrolls normally under a thumb.
+  const vaultRef = useRef<HTMLButtonElement>(null);
   const suppressTap = useRef(false);
   const [drag, setDrag] = useState<{ card: BatchCard; x: number; y: number } | null>(null);
   const [overVault, setOverVault] = useState(false);
 
   const data = batch.data;
-  const interactive = data?.phase === 'selection';
-  const canFreeze = !!interactive && !!data?.freeze.token_available && !data.freeze.frozen_user_id;
+  const choosing = data?.phase === 'selection';
+  const canFreeze = !!choosing && !!data?.freeze.token_available && !data.freeze.frozen_user_id;
 
   const run = useCallback(
     async (action: () => Promise<unknown>, success?: string) => {
@@ -64,8 +104,10 @@ export default function WeeklyTablePage() {
         await action();
         if (success) setMessage({ tone: 'muted', text: success });
         await Promise.all([batch.reload(), matches.reload()]);
+        return true;
       } catch (err) {
         setMessage({ tone: 'error', text: err instanceof ApiError ? err.message : 'That did not go through. Try again.' });
+        return false;
       } finally {
         setBusy(false);
       }
@@ -78,7 +120,7 @@ export default function WeeklyTablePage() {
       run(async () => {
         await api('/batches/current/freeze', { method: 'POST', body: { target_user_id: card.user_id } });
         haptic(14);
-      }, 'Kept. They’ll be at your table again next Monday.'),
+      }, 'Kept in your Freeze Vault. They’ll be back next Monday.'),
     [run],
   );
 
@@ -87,25 +129,39 @@ export default function WeeklyTablePage() {
     return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   };
 
-  const startDrag = (card: BatchCard, e: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!canFreeze) return;
+  const holdStart = (card: BatchCard, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!canFreeze || card.selected || card.frozen || card.carried_over) return;
     const start = { x: e.clientX, y: e.clientY };
-    let moved = false;
+    let armed = false;
+    const preventScroll = (ev: TouchEvent) => ev.preventDefault();
+    const timer = window.setTimeout(() => {
+      armed = true;
+      haptic(12);
+      document.addEventListener('touchmove', preventScroll, { passive: false });
+      setDrag({ card, x: start.x, y: start.y });
+    }, HOLD_MS);
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      document.removeEventListener('touchmove', preventScroll);
+    };
     const move = (ev: PointerEvent) => {
-      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 8) return;
-      moved = true;
+      if (!armed) {
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 10) cleanup();
+        return;
+      }
       ev.preventDefault();
       setDrag({ card, x: ev.clientX, y: ev.clientY });
       setOverVault(insideVault(ev.clientX, ev.clientY));
     };
     const end = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      if (moved) {
-        // Swallow the click the browser fires after a drag; reset if none arrives.
+      cleanup();
+      if (armed) {
+        // Swallow the click that follows the drop; reset if none arrives.
         suppressTap.current = true;
-        window.setTimeout(() => (suppressTap.current = false), 60);
+        window.setTimeout(() => (suppressTap.current = false), 80);
         if (ev.type === 'pointerup' && insideVault(ev.clientX, ev.clientY)) void freeze(card);
       }
       setDrag(null);
@@ -117,68 +173,78 @@ export default function WeeklyTablePage() {
   };
 
   useEffect(() => {
-    if (!drag) return;
-    const prevent = (e: TouchEvent) => e.preventDefault();
-    document.addEventListener('touchmove', prevent, { passive: false });
-    return () => document.removeEventListener('touchmove', prevent);
-  }, [drag]);
+    // Keep the open sheet in step with fresh data (e.g. after choosing).
+    if (detail && data) setDetail(data.cards.find((c) => c.user_id === detail.user_id) ?? null);
+  }, [data]);
 
   if (!session.ready || (batch.loading && !data)) return <Spinner />;
   if (!data) return <Notice tone="error">{batch.error?.message ?? session.error?.message ?? 'Could not load your week.'}</Notice>;
 
   const frozenCard = data.cards.find((c) => c.frozen);
   const liveMatches = (matches.data ?? []).filter((m) => m.status !== 'expired');
+  const midWeek = data.phase === 'exchange_questions' || data.phase === 'exchange_answers';
+  const left = data.selections_remaining;
 
-  const confirmAction = async () => {
-    if (!confirm) return;
-    const { kind, card } = confirm;
-    setConfirm(null);
-    if (kind === 'freeze') return freeze(card);
-    await run(async () => {
-      await api('/escrow/select', { method: 'POST', body: { target_user_id: card.user_id } });
-      haptic([8, 40, 14]);
-    });
+  let header: { title: string; subtitle: string; deadline?: string };
+  if (data.phase === 'awaiting_deal') header = { title: 'Your Monday Batch', subtitle: 'Six introductions arrive this morning', deadline: data.clock.deal_at };
+  else if (choosing) header = { title: 'Your Monday Batch', subtitle: 'Batch closes Tuesday at midnight', deadline: data.clock.selection_closes_at };
+  else if (data.phase === 'exchange_questions') header = { title: 'Mid-Week Drop', subtitle: 'Choose questions until midnight', deadline: data.clock.questions_close_at };
+  else if (data.phase === 'exchange_answers') header = { title: 'Mid-Week Drop', subtitle: 'Answer by voice before Friday noon', deadline: data.clock.answers_close_at };
+  else header = { title: 'This week', subtitle: 'A new batch arrives Monday', deadline: data.clock.next_deal_at };
+
+  const tapOpen = (card: BatchCard) => {
+    if (suppressTap.current) {
+      suppressTap.current = false;
+      return;
+    }
+    setDetail(card);
   };
 
   return (
     <div>
-      <WeekBanner batch={data} firstName={session.me?.first_name ?? null} />
+      <ScreenHeader title={header.title} subtitle={header.subtitle}>
+        {header.deadline && (
+          <p className="mt-2 text-[1.75rem] font-semibold text-brass">
+            <Countdown to={header.deadline} serverNow={data.server_now} style="left" />
+          </p>
+        )}
+        {choosing && data.cards.length > 0 && (
+          <p className="mt-1 text-sm text-muted">
+            {left > 0 ? `Choose up to ${left} more · no photos, no names yet` : 'You’ve chosen your three. Nothing else to do until Wednesday.'}
+          </p>
+        )}
+      </ScreenHeader>
 
       {message && (
-        <div className="mx-auto mb-8 max-w-2xl text-center">
+        <div className="mb-4 text-center">
           <Notice tone={message.tone}>{message.text}</Notice>
         </div>
       )}
 
       {liveMatches.length > 0 && (
-        <section className="mx-auto mb-14 max-w-2xl" aria-labelledby="meetings-heading">
-          <h2 id="meetings-heading" className="mb-4 text-center text-3xl">
-            Your first meetings
+        <section className="mb-6" aria-labelledby="matches-heading">
+          <h2 id="matches-heading" className="mb-2 text-base">
+            Your matches
           </h2>
-          <ul role="list" className="space-y-3">
+          <ul role="list" className="space-y-2.5">
             {liveMatches.map((m) => (
               <li key={m.id}>
-                <Link
-                  href={`/matches/${m.id}`}
-                  className="flex min-h-touch items-center gap-4 rounded-[1.5rem] bg-panel px-5 py-4 shadow-card ring-1 ring-brass/30 transition-colors hover:ring-brass/60"
-                >
+                <Link href={`/matches/${m.id}`} className="flex min-h-[4.5rem] items-center gap-3.5 rounded-2xl border border-brass/60 bg-panel px-4 py-3 shadow-card">
                   {m.counterpart.photo_ids[0] ? (
                     // Plain img: the authenticated, private photo endpoint.
-                    <img src={`/api/photos/${m.counterpart.photo_ids[0]}`} alt="" className="h-14 w-14 rounded-full object-cover" />
+                    <img src={`/api/photos/${m.counterpart.photo_ids[0]}`} alt="" className="h-12 w-12 rounded-full object-cover" />
                   ) : (
-                    <span className="flex h-14 w-14 items-center justify-center rounded-full bg-forest font-serif text-2xl" aria-hidden="true">
-                      {m.counterpart.first_name.slice(0, 1)}
-                    </span>
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pine text-lg font-semibold">{m.counterpart.first_name.slice(0, 1)}</span>
                   )}
                   <span className="flex-1">
-                    <span className="block font-serif text-2xl">{m.counterpart.first_name}</span>
-                    <span className="block text-sm text-muted">
+                    <span className="block font-medium">
+                      {m.counterpart.first_name}, {m.counterpart.age}
+                    </span>
+                    <span className="block text-[0.8125rem] text-muted">
                       {m.event && m.status === 'scheduled' ? `Meeting ${formatDateTime(m.event.starts_at)}` : MATCH_STATUS[m.status]}
                     </span>
                   </span>
-                  <span className="text-brass" aria-hidden="true">
-                    →
-                  </span>
+                  <ChevronRight size={18} className="text-muted" />
                 </Link>
               </li>
             ))}
@@ -187,97 +253,140 @@ export default function WeeklyTablePage() {
       )}
 
       {data.exchanges.length > 0 && (
-        <section className="mb-14" aria-labelledby="exchanges-heading">
-          <h2 id="exchanges-heading" className="mb-2 text-center text-3xl">
+        <section className="mb-6" aria-labelledby="exchanges-heading">
+          <h2 id="exchanges-heading" className="mb-2 text-base">
             You chose each other
           </h2>
-          <p className="mx-auto mb-8 max-w-xl text-center text-ink/70">
-            Once you’ve both sent your spoken answers, you’ll see each other’s name and face at the same moment.
-          </p>
-          <ul role="list" className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
+          <ul role="list" className="space-y-2.5">
             {data.exchanges.map((x) => (
-              <ExchangeCard key={x.id} exchange={x} serverNow={data.server_now} />
+              <ExchangeRow key={x.id} x={x} serverNow={data.server_now} />
             ))}
           </ul>
         </section>
       )}
 
-      {data.cards.length > 0 ? (
-        <WeeklyTable title="This week’s table">
-          {data.cards.map((card) => (
-            <MondayCard
-              key={card.user_id}
-              card={card}
-              interactive={!!interactive}
-              choicesLeft={data.selections_remaining}
-              canFreeze={canFreeze && !card.carried_over}
-              onChoose={(c) => setConfirm({ kind: 'select', card: c })}
-              onFreeze={(c) => {
-                if (suppressTap.current) {
-                  suppressTap.current = false;
-                  return;
-                }
-                setConfirm({ kind: 'freeze', card: c });
-              }}
-              onDragStart={startDrag}
-            />
-          ))}
-        </WeeklyTable>
-      ) : (
-        data.exchanges.length === 0 && (
-          <Panel className="mx-auto max-w-xl p-10 text-center">
-            <h2 className="text-3xl">
-              {data.phase === 'awaiting_deal' ? 'Your table is being set' : interactive ? 'No introductions yet' : 'The table is cleared'}
-            </h2>
-            <p className="mx-auto mt-3 max-w-md text-ink/70">
-              {data.phase === 'awaiting_deal'
-                ? 'This week’s introductions arrive Monday morning.'
-                : interactive
-                  ? 'There’s nobody new near you who fits how you want to live just yet. We look again every hour until Tuesday night.'
-                  : 'A fresh table is set on Monday morning.'}
-            </p>
-            {devTools && (
-              <Link href="/test" className="tap mt-6 rounded-full bg-accent px-6 text-sm font-medium text-canvas">
-                Open test tools
-              </Link>
-            )}
-          </Panel>
-        )
+      {midWeek && data.exchanges.length === 0 && (
+        <Panel className="p-6 text-center">
+          <p className="font-medium">Nothing became mutual this week</p>
+          <p className="mt-1 text-sm text-muted">That’s part of the rhythm, and nobody was turned away. A new batch arrives Monday.</p>
+        </Panel>
       )}
 
-      {interactive && data.cards.length > 0 && (
+      {data.cards.length > 0 && !midWeek && (
+        <ul role="list" className="grid grid-cols-2 gap-3">
+          {data.cards.map((card) => (
+            <CardTile key={card.user_id} card={card} onOpen={tapOpen} onHoldStart={holdStart} />
+          ))}
+        </ul>
+      )}
+
+      {data.cards.length === 0 && !midWeek && data.exchanges.length === 0 && (
+        <Panel className="p-6 text-center">
+          <p className="font-medium">{choosing ? 'No introductions yet' : 'Your table is being set'}</p>
+          <p className="mt-1 text-sm text-muted">
+            {choosing
+              ? 'There’s nobody new near you who fits how you want to live just yet. We look again every hour until Tuesday night.'
+              : 'A new batch of six arrives Monday morning.'}
+          </p>
+          {devTools && (
+            <Link href="/test" className="tap btn-gold mt-5 rounded-xl px-6 text-sm">
+              Open test tools
+            </Link>
+          )}
+        </Panel>
+      )}
+
+      {choosing && data.cards.length > 0 && (
         <FreezeVault
           freeze={data.freeze}
           frozenCard={frozenCard}
           dragging={drag !== null}
           over={overVault}
           vaultRef={vaultRef}
-          busy={busy}
-          onUnfreeze={() => run(() => api('/batches/current/freeze', { method: 'DELETE' }), 'Back on the table.')}
+          onOpen={() => setVaultOpen(true)}
         />
       )}
 
       {drag && (
         <div
-          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-[1.25rem] bg-panel px-5 py-3 shadow-sheet ring-1 ring-brass/60"
+          className="pointer-events-none fixed z-50 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-2xl border border-brass/70 bg-panel px-4 py-3 shadow-sheet"
           style={{ left: drag.x, top: drag.y }}
           aria-hidden="true"
         >
-          <p className="font-serif text-lg">{drag.card.interests[0]?.label}</p>
-          <p className="text-xs text-muted">About {drag.card.distance_km} km from you</p>
+          <BlurredAvatar size={44} />
+          <p className="mt-1 text-sm font-medium">{drag.card.interests[0]?.label}</p>
         </div>
       )}
 
-      <BottomSheet open={confirm !== null} title={confirm ? CONFIRM_COPY[confirm.kind].title : ''} onClose={() => setConfirm(null)}>
-        <p className="text-ink/75">{confirm && CONFIRM_COPY[confirm.kind].body}</p>
-        <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirm(null)}>
-            Not yet
-          </Button>
-          <Button onClick={confirmAction} busy={busy}>
-            {confirm && CONFIRM_COPY[confirm.kind].action}
-          </Button>
-        </div>
+      <BottomSheet tall open={detail !== null} title="Their card" onClose={() => setDetail(null)}>
+        {detail && (
+          <>
+            {detail.carried_over && <p className="mb-3 text-sm text-brass">You kept this one from last week.</p>}
+            <CardBody profile={detail} />
+            <div className="mt-6 space-y-2.5">
+              {detail.selected ? (
+                <p className="rounded-xl border border-brass/40 bg-brass/10 px-4 py-3 text-sm" role="status">
+                  You chose them. They’ll only ever know if they chose you too.
+                </p>
+              ) : detail.frozen ? (
+                <p className="rounded-xl border border-line bg-raised px-4 py-3 text-sm" role="status">
+                  In your Freeze Vault. They’ll be back in next Monday’s batch.
+                </p>
+              ) : choosing ? (
+                <>
+                  <Button
+                    className="w-full"
+                    busy={busy}
+                    disabled={left === 0}
+                    onClick={() =>
+                      run(async () => {
+                        await api('/escrow/select', { method: 'POST', body: { target_user_id: detail.user_id } });
+                        haptic([8, 40, 14]);
+                      })
+                    }
+                  >
+                    {left > 0 ? 'I’d like to hear from them' : 'You’ve chosen three this week'}
+                  </Button>
+                  {canFreeze && !detail.carried_over && (
+                    <Button variant="quiet" className="w-full" busy={busy} onClick={() => void freeze(detail)}>
+                      <Snowflake size={18} className="text-sky-200/90" />
+                      Keep for next week
+                    </Button>
+                  )}
+                  <p className="pt-1 text-center text-xs text-muted">Sealed. They never know unless they choose you too.</p>
+                </>
+              ) : (
+                <p className="text-center text-sm text-muted">Choosing has closed for this week.</p>
+              )}
+            </div>
+          </>
+        )}
+      </BottomSheet>
+
+      <BottomSheet open={vaultOpen} title="Freeze Vault" onClose={() => setVaultOpen(false)}>
+        <p className="text-sm text-ink/80">
+          Not ready to decide on someone? Keep one person a week here and they’ll be back in next Monday’s batch. Press and hold a card to drag it
+          in, or use “Keep for next week” on their card.
+        </p>
+        {frozenCard ? (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3">
+            <BlurredAvatar size={40} />
+            <span className="flex-1 text-sm font-medium">{frozenCard.interests.map((i) => i.label).join(' · ')}</span>
+            <Button
+              variant="ghost"
+              busy={busy}
+              onClick={async () => {
+                if (await run(() => api('/batches/current/freeze', { method: 'DELETE' }), 'Back in this week’s batch.')) setVaultOpen(false);
+              }}
+            >
+              Put back
+            </Button>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted">
+            {data.freeze.used_for === 'raincheck' ? 'This week’s token went on a raincheck.' : '1 token available this week.'}
+          </p>
+        )}
       </BottomSheet>
     </div>
   );

@@ -2,12 +2,12 @@
 
 import type { BatchCard, CurrentBatchResponse } from '@thirtydates/shared';
 import type { Ref } from 'react';
+import { ChevronRight, Snowflake } from './icons';
 import { cx } from './primitives';
 
 /**
- * The Freeze Vault, resting at the foot of the table all week: one place to keep a person you're
- * not ready to decide on, so they come back next Monday. Drop a card's "Keep for next week"
- * button here, or simply tap it.
+ * The Freeze Vault bar, resting above the tab bar all week. One token a week keeps one person
+ * for next Monday. Tap it for details, or press and hold a tile and drop it here.
  */
 export function FreezeVault({
   freeze,
@@ -15,61 +15,39 @@ export function FreezeVault({
   dragging,
   over,
   vaultRef,
-  onUnfreeze,
-  busy,
+  onOpen,
 }: {
   freeze: CurrentBatchResponse['freeze'];
   frozenCard: BatchCard | undefined;
   dragging: boolean;
   over: boolean;
-  vaultRef: Ref<HTMLDivElement>;
-  onUnfreeze: () => void;
-  busy: boolean;
+  vaultRef: Ref<HTMLButtonElement>;
+  onOpen: () => void;
 }) {
-  let body: React.ReactNode;
-  if (frozenCard) {
-    body = (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-ink/80">
-          Keeping <span className="font-serif text-lg italic">{frozenCard.interests[0]?.label.toLowerCase()}</span>, about{' '}
-          {frozenCard.distance_km} km away, for next Monday.
-        </p>
-        <button type="button" onClick={onUnfreeze} disabled={busy} className="tap rounded-full px-4 text-sm text-muted hover:text-ink disabled:opacity-40">
-          Put back on the table
-        </button>
-      </div>
-    );
-  } else if (freeze.used_for === 'raincheck') {
-    body = <p className="text-muted">This week’s Freeze went on a raincheck for a first meeting.</p>;
-  } else {
-    body = (
-      <p className={cx(dragging ? 'text-brass' : 'text-muted')}>
-        {dragging ? 'Let go here to keep them for next week.' : 'Keep one person for next Monday.'}
-      </p>
-    );
-  }
+  const available = freeze.token_available && !freeze.frozen_user_id;
+  let label: string;
+  if (dragging) label = 'Drop here to keep for next week';
+  else if (frozenCard) label = `Freeze Vault · ${frozenCard.interests[0]?.label ?? 'one card'} kept`;
+  else if (freeze.used_for === 'raincheck') label = 'Freeze Vault (used on a raincheck)';
+  else label = `Freeze Vault (${available ? 1 : 0} Available)`;
 
   return (
-    <div className="sticky bottom-3 z-30 mx-auto mt-12 max-w-2xl">
-      <div
+    <div className="sticky bottom-[4.75rem] z-30 mt-5">
+      <button
         ref={vaultRef}
-        role="region"
-        aria-label="Freeze Vault"
+        type="button"
+        onClick={onOpen}
         className={cx(
-          'flex items-center gap-3 rounded-[1.5rem] border border-dashed px-4 py-2.5 backdrop-blur-md transition-colors duration-200 ease-calm',
-          dragging && over ? 'border-brass bg-brass/20' : dragging ? 'border-brass/60 bg-raised/95' : 'border-line bg-raised/90',
+          'flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border px-4 text-left shadow-card backdrop-blur-md transition-colors duration-200',
+          dragging && over ? 'border-brass bg-brass/25' : dragging ? 'border-dashed border-brass/70 bg-raised/95' : 'border-line bg-raised/95',
         )}
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest/40 text-brass" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" />
-          </svg>
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine text-sky-200/90">
+          <Snowflake size={18} />
         </span>
-        <div className="flex-1 text-sm leading-snug">
-          <p className="font-serif text-base">Freeze Vault</p>
-          {body}
-        </div>
-      </div>
+        <span className="flex-1 font-medium">{label}</span>
+        {!dragging && <ChevronRight size={18} className="text-muted" />}
+      </button>
     </div>
   );
 }

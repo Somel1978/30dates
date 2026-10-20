@@ -33,7 +33,7 @@ function Verify() {
       <p className="mt-2 text-muted" role="alert">
         {error}
       </p>
-      <Link href="/signin" className="tap mt-4 rounded-full bg-accent px-6 text-sm font-medium text-canvas">
+      <Link href="/signin" className="tap btn-gold mt-4 rounded-xl px-6 text-sm">
         Request a new link
       </Link>
     </Panel>

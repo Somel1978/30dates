@@ -101,7 +101,8 @@ describe('week clock (UTC)', () => {
 describe('voice prompt bank', () => {
   it('has unique keys and enough prompts for two picks of three', () => {
     expect(VOICE_PROMPT_BY_KEY.size).toBe(VOICE_PROMPTS.length);
-    expect(VOICE_PROMPTS.length).toBeGreaterThanOrEqual(6);
+    expect(VOICE_PROMPTS.length).toBe(90);
+    for (const v of ['rhythm', 'repair', 'joy']) expect(VOICE_PROMPTS.filter((p) => p.vector === v)).toHaveLength(30);
   });
 });
 

@@ -47,15 +47,15 @@ export async function loadCardProfiles(tx: Tx, viewerId: string, userIds: readon
 export async function loadRevealedIdentities(
   tx: Tx,
   userIds: readonly string[],
-): Promise<Map<string, { first_name: string; photo_ids: string[] }>> {
+): Promise<Map<string, { first_name: string; age: number; photo_ids: string[] }>> {
   if (userIds.length === 0) return new Map();
-  const { rows } = await tx.query<{ id: string; first_name: string; photo_ids: string[] }>(
-    `SELECT u.id, u.first_name,
+  const { rows } = await tx.query<{ id: string; first_name: string; age: number; photo_ids: string[] }>(
+    `SELECT u.id, u.first_name, date_part('year', age(u.birth_date))::int AS age,
             coalesce(array_agg(p.id ORDER BY p.position) FILTER (WHERE p.id IS NOT NULL), '{}') AS photo_ids
        FROM users u LEFT JOIN user_photos p ON p.user_id = u.id
       WHERE u.id = ANY ($1::uuid[])
       GROUP BY u.id`,
     [userIds],
   );
-  return new Map(rows.map((r) => [r.id, { first_name: r.first_name, photo_ids: r.photo_ids }]));
+  return new Map(rows.map((r) => [r.id, { first_name: r.first_name, age: r.age, photo_ids: r.photo_ids }]));
 }

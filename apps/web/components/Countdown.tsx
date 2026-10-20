@@ -1,13 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatDuration } from '@/lib/format';
+import { formatDuration, formatLeft } from '@/lib/format';
 
 /**
  * Live countdown to a UTC deadline. `serverNow` corrects for a wrong device clock: the offset
  * observed at fetch time is applied to every tick.
  */
-export function Countdown({ to, serverNow, className }: { to: string; serverNow: string; className?: string }) {
+export function Countdown({
+  to,
+  serverNow,
+  className,
+  style = 'short',
+}: {
+  to: string;
+  serverNow: string;
+  className?: string;
+  /** 'short' = "1d 4h"; 'left' = "1 Day Left". */
+  style?: 'short' | 'left';
+}) {
   const [skew] = useState(() => Date.parse(serverNow) - Date.now());
   const [now, setNow] = useState(() => Date.now() + skew);
   useEffect(() => {
@@ -17,7 +28,7 @@ export function Countdown({ to, serverNow, className }: { to: string; serverNow:
   const left = Date.parse(to) - now;
   return (
     <span className={className} aria-live="off">
-      {left > 0 ? formatDuration(left) : 'closed'}
+      {style === 'left' ? formatLeft(left) : left > 0 ? formatDuration(left) : 'closed'}
     </span>
   );
 }

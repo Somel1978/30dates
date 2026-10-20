@@ -27,6 +27,7 @@ module.exports = {
         line: 'rgb(var(--color-line) / <alpha-value>)',
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         brass: 'rgb(var(--color-brass) / <alpha-value>)',
+        pine: 'rgb(var(--color-forest) / <alpha-value>)',
       },
       fontFamily: {
         serif: ['var(--font-serif)', 'Cormorant Garamond', 'Playfair Display', 'Georgia', 'serif'],
@@ -41,7 +42,7 @@ module.exports = {
         xl: ['1.375rem', { lineHeight: '1.5' }],
         '2xl': ['1.75rem', { lineHeight: '1.35' }],
         '3xl': ['2.25rem', { lineHeight: '1.2' }],
-        '4xl': ['3rem', { lineHeight: '1.1' }],
+        '4xl': ['2.5rem', { lineHeight: '1.1' }],
       },
       letterSpacing: {
         eyebrow: '0.18em',
@@ -60,7 +61,7 @@ module.exports = {
         sheet: '1.75rem',
       },
       boxShadow: {
-        card: '0 1px 0 rgb(255 255 255 / 0.03) inset, 0 18px 40px -24px rgb(0 0 0 / 0.55)',
+        card: '0 1px 0 rgb(255 255 255 / 0.04) inset, 0 14px 30px -18px rgb(0 0 0 / 0.7)',
         sheet: '0 -24px 60px -20px rgb(0 0 0 / 0.6)',
       },
       transitionTimingFunction: {

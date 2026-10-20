@@ -3,6 +3,7 @@
 import { MAX_ANSWER_SECONDS } from '@thirtydates/shared';
 import { useEffect, useRef, useState } from 'react';
 import { deleteDraft, loadDraft, saveDraft } from '@/lib/drafts';
+import { Check, Mic } from './icons';
 import { haptic } from '@/lib/format';
 import { cx } from './primitives';
 
@@ -115,41 +116,35 @@ export function VoiceRecorder({
   };
 
   return (
-    <div className="rounded-2xl border border-line/70 bg-raised/40 p-4">
-      <p className="font-serif text-xl leading-snug">{question}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+    <div className={cx('rounded-2xl border bg-panel p-4 shadow-card', draftUrl ? 'border-brass/50' : 'border-line')}>
+      <div className="flex gap-3">
+        <span className={cx('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', draftUrl ? 'bg-brass/20 text-brass' : 'bg-raised text-muted')}>
+          {draftUrl ? <Check size={16} /> : <Mic size={16} />}
+        </span>
+        <p className="font-medium leading-snug">{question}</p>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {recording ? (
-          <button
-            type="button"
-            onClick={stop}
-            className="tap gap-2 rounded-full bg-accent px-5 text-sm font-medium text-canvas"
-            aria-label="Stop recording"
-          >
+          <button type="button" onClick={stop} className="tap w-full gap-2 rounded-xl bg-accent px-5 text-sm font-semibold text-canvas" aria-label="Stop recording">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-canvas" aria-hidden="true" />
             Stop · {elapsed}s / {MAX_ANSWER_SECONDS}s
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={start}
-            disabled={disabled}
-            className={cx(
-              'tap rounded-full border px-5 text-sm',
-              draftUrl ? 'border-line text-muted hover:text-ink' : 'border-brass/60 text-brass hover:bg-brass/10',
-              'disabled:opacity-40',
-            )}
-          >
-            {draftUrl ? 'Record again' : 'Record answer'}
-          </button>
-        )}
-        {draftUrl && !recording && (
+        ) : draftUrl ? (
           <>
             {/* Local playback of the draft; nothing has been sent. */}
-            <audio src={draftUrl} controls className="h-10 max-w-full" />
-            <button type="button" onClick={discard} disabled={disabled} className="tap rounded-full px-3 text-sm text-muted hover:text-ink">
+            <audio src={draftUrl} controls className="h-10 w-full" />
+            <button type="button" onClick={start} disabled={disabled} className="tap flex-1 rounded-xl border border-line bg-raised px-4 text-sm disabled:opacity-40">
+              Record again
+            </button>
+            <button type="button" onClick={discard} disabled={disabled} className="tap rounded-xl px-4 text-sm text-muted hover:text-ink">
               Discard
             </button>
           </>
+        ) : (
+          <button type="button" onClick={start} disabled={disabled} className="tap btn-gold w-full gap-2 rounded-xl px-5 text-sm disabled:opacity-40">
+            <Mic size={18} />
+            Record answer
+          </button>
         )}
       </div>
       <p className="mt-2 text-xs text-muted">

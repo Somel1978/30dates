@@ -81,7 +81,7 @@ export default function TestToolsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <header>
         <p className="eyebrow text-brass">Development only</p>
-        <h1 className="mt-1 text-4xl">Test tools</h1>
+        <h1 className="mt-1 text-[1.75rem]">Test tools</h1>
         <p className="mt-2 text-muted">
           Walk the whole week on your own: seed members built to match you, deal, get selected, move the clock, exchange voice notes, reach the First-Meet Bridge.
         </p>
@@ -90,12 +90,12 @@ export default function TestToolsPage() {
       <Panel className="grid gap-4 p-5 sm:grid-cols-3">
         <div>
           <p className="eyebrow">App clock</p>
-          <p className="font-serif text-xl">{formatDateTime(s.server_now)}</p>
+          <p className="text-lg font-semibold">{formatDateTime(s.server_now)}</p>
           <p className="text-xs text-muted">{s.clock_shifted ? 'Shifted for testing' : 'Real time'}</p>
         </div>
         <div className="sm:col-span-2">
           <p className="eyebrow">Phase · week of {s.batch_week}</p>
-          <p className="font-serif text-xl">{PHASE_LABEL[s.phase]}</p>
+          <p className="text-lg font-semibold">{PHASE_LABEL[s.phase]}</p>
         </div>
         <dl className="col-span-full grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
           {[
@@ -107,7 +107,7 @@ export default function TestToolsPage() {
           ].map(([k, v]) => (
             <div key={k} className="rounded-xl bg-raised/60 p-3">
               <dt className="text-muted">{k}</dt>
-              <dd className="font-serif text-2xl">{v}</dd>
+              <dd className="text-xl font-semibold">{v}</dd>
             </div>
           ))}
         </dl>

@@ -151,7 +151,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/exchanges/:id/audio/:answerer/:prompt', member, async (req, reply) => {
     const params = parse(
-      z.object({ id: uuid, answerer: uuid, prompt: z.string().regex(/^[a-z_]{1,48}$/) }),
+      z.object({ id: uuid, answerer: uuid, prompt: z.string().regex(/^[a-z0-9_]{1,48}$/) }),
       req.params,
     );
     const audio = await readAnswerAudio(ctx, req.auth.userId, params.id, params.answerer, params.prompt);

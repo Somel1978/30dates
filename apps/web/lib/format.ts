@@ -47,3 +47,14 @@ export function haptic(pattern: number | number[] = 10): void {
     // Vibration is best-effort.
   }
 }
+
+/** "6 Days Left" style label for the big gold deadline on each screen. */
+export function formatLeft(ms: number): string {
+  if (ms <= 0) return 'Closed';
+  const hours = Math.floor(ms / 3_600_000);
+  const days = Math.floor(hours / 24);
+  if (days >= 1) return `${days} ${days === 1 ? 'Day' : 'Days'} Left`;
+  if (hours >= 1) return `${hours} ${hours === 1 ? 'Hour' : 'Hours'} Left`;
+  const minutes = Math.max(1, Math.floor(ms / 60_000));
+  return `${minutes} ${minutes === 1 ? 'Minute' : 'Minutes'} Left`;
+}
