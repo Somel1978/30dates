@@ -11,93 +11,74 @@ import {
   type PromptVector,
 } from '@thirtydates/shared';
 import Link from 'next/link';
-import { useRouter, useParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BridgePanel } from '@/components/BridgePanel';
 import { Countdown } from '@/components/Countdown';
 import { EventPanel } from '@/components/EventPanel';
-import { Lock, Spark } from '@/components/icons';
-import { BlurredAvatar, CardBody } from '@/components/MondayCard';
-import { VoiceRecorder, recordingAvailable } from '@/components/VoiceRecorder';
-import { BottomSheet, Button, Notice, OptionRow, Panel, ScreenHeader, Spinner, StickyActions, cx } from '@/components/primitives';
+import { Check, ChevronLeft, Lock } from '@/components/icons';
+import { CardBody } from '@/components/MondayCard';
+import { VoiceRecorder, recordingAvailable, type DraftInfo } from '@/components/VoiceRecorder';
+import { BottomSheet, Button, Notice, Spinner, StickyActions, cx } from '@/components/primitives';
 import { ApiError, api, useResource } from '@/lib/api';
+import { formatSeconds, useAudioShape } from '@/lib/audio';
 import { deleteDraft } from '@/lib/drafts';
 import { haptic } from '@/lib/format';
-import { useRevealed } from '@/lib/reveal';
 import { useMemberSession } from '@/lib/session';
 
 const EXTENSION: Record<string, string> = { 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/wav': 'wav' };
+const VISIBLE_PROMPTS = 3;
 
-/** Gold progress ring: how many of the needed steps are done. */
-function ProgressRing({ value, max }: { value: number; max: number }) {
-  const r = 26;
-  const c = 2 * Math.PI * r;
+function BackLink() {
   return (
-    <svg width="64" height="64" viewBox="0 0 64 64" className="mx-auto" role="img" aria-label={`${value} of ${max}`}>
-      <circle cx="32" cy="32" r={r} fill="none" stroke="rgb(var(--color-line))" strokeWidth="5" />
-      <circle
-        cx="32"
-        cy="32"
-        r={r}
-        fill="none"
-        stroke="rgb(var(--color-brass))"
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeDasharray={c}
-        strokeDashoffset={c * (1 - Math.min(value, max) / max)}
-        transform="rotate(-90 32 32)"
-        className="transition-[stroke-dashoffset] duration-500 ease-calm"
-      />
-    </svg>
+    <Link href="/" className="tap -ml-2 gap-1.5 px-2 text-[13.5px] text-ink/85 hover:text-ink">
+      <ChevronLeft size={16} />
+      This week
+    </Link>
   );
 }
 
-/** You, and the still-sealed other person. */
-function UnlockPair({ caption }: { caption: string }) {
-  const session = useMemberSession({ requireOnboarded: false });
-  const mine = session.me?.photos[0];
+/** Two overlapping rings: a mutual hold. */
+function MutualMark() {
   return (
-    <div className="my-5 flex flex-col items-center">
-      <div className="flex items-center">
-        {mine ? (
-          // Plain img: the authenticated, private photo endpoint.
-          <img src={`/api/photos/${mine.id}`} alt="You" className="relative z-10 h-14 w-14 rounded-full object-cover ring-2 ring-canvas" />
-        ) : (
-          <BlurredAvatar size={56} className="relative z-10 ring-2 ring-canvas" />
-        )}
-        <span className="-ml-3 flex h-14 w-14 items-center justify-center rounded-full bg-raised text-2xl font-semibold text-brass ring-2 ring-canvas">?</span>
-      </div>
-      <p className="mt-2 text-sm text-muted">{caption}</p>
-    </div>
+    <span className="relative inline-flex h-3.5 w-5" aria-hidden="true">
+      <span className="absolute left-0 h-3.5 w-3.5 rounded-full bg-brass/80" />
+      <span className="absolute left-1.5 h-3.5 w-3.5 rounded-full border border-brass bg-canvas/40" />
+    </span>
   );
 }
 
-type Pick = { key: string | null; text: string; custom: boolean };
-
+// ---------------------------------------------------------------------------
+// Wednesday: choose 3 questions to ask them
+// ---------------------------------------------------------------------------
+type Pick = { key: string | null; text: string; custom: boolean; vector: PromptVector | null };
 const pickId = (p: Pick) => (p.custom ? `text:${p.text}` : `key:${p.key}`);
 
 function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSaved: (x: ExchangeDetail) => void }) {
-  const initial = useMemo<Pick[]>(() => exchange.my_picks.map((p) => ({ key: p.custom ? null : p.key, text: p.text, custom: p.custom })), [exchange.my_picks]);
+  const vectorOf = useMemo(() => new Map(exchange.prompt_bank.map((p) => [p.key, p.vector])), [exchange.prompt_bank]);
+  const initial = useMemo<Pick[]>(
+    () => exchange.my_picks.map((p) => ({ key: p.custom ? null : p.key, text: p.text, custom: p.custom, vector: p.custom ? null : vectorOf.get(p.key) ?? null })),
+    [exchange.my_picks, vectorOf],
+  );
   const [picked, setPicked] = useState<Pick[]>(initial);
   const [tab, setTab] = useState<PromptVector>('rhythm');
+  const [offset, setOffset] = useState<Record<PromptVector, number>>({ rhythm: 0, repair: 0, joy: 0 });
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'muted' | 'error'; text: string }>();
   const dirty = picked.map(pickId).join('|') !== initial.map(pickId).join('|');
   const full = picked.length >= MAX_PROMPTS_PER_PICK;
-  const valid = picked.length === MAX_PROMPTS_PER_PICK;
 
   const toggle = (p: Pick) =>
-    setPicked((list) => (list.some((x) => pickId(x) === pickId(p)) ? list.filter((x) => pickId(x) !== pickId(p)) : list.length < MAX_PROMPTS_PER_PICK ? [...list, p] : list));
+    setPicked((list) =>
+      list.some((x) => pickId(x) === pickId(p)) ? list.filter((x) => pickId(x) !== pickId(p)) : list.length < MAX_PROMPTS_PER_PICK ? [...list, p] : list,
+    );
 
-  const addOwn = () => {
-    const text = draft.trim().replace(/\s+/g, ' ');
-    if (text.length < CUSTOM_QUESTION_MIN) return;
-    toggle({ key: null, text, custom: true });
-    setDraft('');
-    setWriting(false);
-  };
+  const bank = exchange.prompt_bank.filter((p) => p.vector === tab && !picked.some((x) => x.key === p.key));
+  const start = bank.length ? offset[tab] % bank.length : 0;
+  const visible = Array.from({ length: Math.min(VISIBLE_PROMPTS, bank.length) }, (_, i) => bank[(start + i) % bank.length]!);
+  const selectedHere = picked.filter((p) => p.vector === tab || p.custom);
 
   const save = async () => {
     setBusy(true);
@@ -105,76 +86,129 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
     try {
       const questions = picked.map((p) => (p.custom ? { text: p.text } : { key: p.key! }));
       onSaved(await api<ExchangeDetail>(`/exchanges/${exchange.id}/questions`, { method: 'PUT', body: { questions } }));
-      haptic(10);
-      setMessage({ tone: 'muted', text: 'Locked in. They’ll see your questions on Thursday.' });
+      haptic([8, 40, 14]);
+      setMessage({ tone: 'muted', text: 'Sent to the vault. They’ll see your questions when the Response Clock starts.' });
     } catch (err) {
-      setMessage({ tone: 'error', text: err instanceof ApiError ? err.message : 'Not saved' });
+      setMessage({ tone: 'error', text: err instanceof ApiError ? err.message : 'Not sent' });
     } finally {
       setBusy(false);
     }
   };
 
+  const addOwn = () => {
+    const text = draft.trim().replace(/\s+/g, ' ');
+    if (text.length < CUSTOM_QUESTION_MIN) return;
+    toggle({ key: null, text, custom: true, vector: null });
+    setDraft('');
+    setWriting(false);
+  };
+
   return (
     <div>
-      <div className="text-center">
-        <ProgressRing value={picked.length} max={MAX_PROMPTS_PER_PICK} />
-        <h1 className="mt-3 text-[1.75rem] leading-tight">Mid-Week Drop</h1>
-        <p className="mt-1 text-sm text-muted">
-          {full ? 'Ready to lock' : `${MAX_PROMPTS_PER_PICK} questions to unlock`} · changes close in{' '}
-          <Countdown to={exchange.questions_close_at} serverNow={exchange.server_now} className="text-ink" />
+      <div className="flex items-center justify-between">
+        <p className="flex items-center gap-2 text-[13px] text-ink/85">
+          <MutualMark /> Mutual Match Confirmed
+        </p>
+        <span className="pill">
+          <span className="h-1.5 w-1.5 rounded-full bg-brass" />
+          <Countdown to={exchange.questions_close_at} serverNow={exchange.server_now} style="hm" /> left
+        </span>
+      </div>
+      <h1 className="mt-5 text-[2.125rem] leading-[1.05]">Choose 3 questions to ask them</h1>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
+        Photos unblur and voice notes become playable the moment both of you lock your responses.
+      </p>
+
+      <div role="tablist" className="mt-5 grid grid-cols-3 gap-1 rounded-[14px] border border-line bg-panel p-1">
+        {PROMPT_VECTORS.map((v) => {
+          const has = picked.some((p) => p.vector === v);
+          return (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={tab === v}
+              onClick={() => setTab(v)}
+              className={cx(
+                'flex min-h-[2.75rem] items-center justify-center gap-1 rounded-[10px] text-[13px] transition-colors',
+                tab === v ? 'btn-copper' : has ? 'border border-line bg-raised text-ink' : 'text-muted',
+              )}
+            >
+              {PROMPT_VECTOR_LABELS[v].title}
+              {has && tab !== v && <Check size={13} />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 flex items-center justify-between">
+        <p className="eyebrow">Selected prompts</p>
+        <p className="eyebrow">
+          {picked.length} of {MAX_PROMPTS_PER_PICK} chosen
         </p>
       </div>
-      <UnlockPair caption="Unlock" />
 
-      {picked.length > 0 && (
-        <div className="mb-4 space-y-2">
-          <p className="text-sm font-medium">Your two questions</p>
-          {picked.map((p) => (
-            <OptionRow key={pickId(p)} title={<span className="text-[0.9375rem] font-normal">{p.text}</span>} subtitle={p.custom ? 'Written by you · tap to remove' : 'Tap to remove'} selected onClick={() => toggle(p)} />
-          ))}
+      <ul className="mt-3 space-y-2.5">
+        {selectedHere.map((p) => (
+          <li key={pickId(p)}>
+            <button
+              type="button"
+              aria-pressed="true"
+              onClick={() => toggle(p)}
+              className="w-full rounded-[16px] border border-brass/80 bg-gradient-to-b from-brass/[0.13] to-brass/[0.03] p-4 text-left"
+            >
+              <span className="flex items-center justify-between">
+                <span className="label-mono">{p.custom ? 'Your own question' : 'Selected'}</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brass text-[#1A130B]">
+                  <Check size={12} strokeWidth={3} />
+                </span>
+              </span>
+              <span className="mt-2 block font-serif text-[1.375rem] leading-[1.2]">“{p.text}”</span>
+            </button>
+          </li>
+        ))}
+        {visible.map((p) => (
+          <li key={p.key}>
+            <button
+              type="button"
+              aria-pressed="false"
+              disabled={full}
+              onClick={() => toggle({ key: p.key, text: p.text, custom: false, vector: p.vector })}
+              className="flex w-full items-center gap-3 rounded-[16px] border border-line bg-panel p-4 text-left transition-colors hover:border-muted/40 disabled:opacity-40"
+            >
+              <span className="flex-1 font-serif text-[1.125rem] leading-snug text-ink/75">“{p.text}”</span>
+              <span className="h-5 w-5 shrink-0 rounded-full border border-muted/40" aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-4 flex flex-col items-center gap-1">
+        <button type="button" onClick={() => setOffset((o) => ({ ...o, [tab]: o[tab] + VISIBLE_PROMPTS }))} className="tap gap-2 text-[13px] text-brass">
+          <span aria-hidden="true">↻</span> Shuffle more conversational prompts
+        </button>
+        {!full && (
+          <button type="button" onClick={() => setWriting(true)} className="tap text-[13px] text-muted underline-offset-4 hover:text-ink hover:underline">
+            or write your own question
+          </button>
+        )}
+      </div>
+      {message && (
+        <div className="mt-2 text-center">
+          <Notice tone={message.tone}>{message.text}</Notice>
         </div>
       )}
 
-      {!full && (
-        <>
-          <OptionRow icon={<Spark size={18} />} title="Write your own question" subtitle="Ask exactly what you want to hear them answer" onClick={() => setWriting(true)} trailing={<span className="text-xl text-brass">+</span>} />
-          <p className="mb-2 mt-5 text-sm font-medium">Or choose</p>
-          <div role="tablist" className="mb-3 grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
-            {PROMPT_VECTORS.map((v) => (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                aria-selected={tab === v}
-                onClick={() => setTab(v)}
-                className={cx('min-h-[2.5rem] rounded-lg text-[0.8125rem] font-medium transition-colors', tab === v ? 'bg-raised text-brass' : 'text-muted')}
-              >
-                {PROMPT_VECTOR_LABELS[v].title}
-              </button>
-            ))}
-          </div>
-          <p className="mb-3 text-xs text-muted">{PROMPT_VECTOR_LABELS[tab].subtitle}</p>
-          <ul role="list" className="space-y-2.5">
-            {exchange.prompt_bank
-              .filter((p) => p.vector === tab && !picked.some((x) => x.key === p.key))
-              .map((p) => (
-                <li key={p.key}>
-                  <OptionRow icon={<Lock size={16} />} title={<span className="text-[0.9375rem] font-normal">{p.text}</span>} onClick={() => toggle({ key: p.key, text: p.text, custom: false })} />
-                </li>
-              ))}
-          </ul>
-        </>
-      )}
-
-      <StickyActions aboveTabs>
-        <Button className="w-full" onClick={save} busy={busy} disabled={!valid || !dirty}>
-          {exchange.my_picks.length ? 'Update choices' : 'Lock choices'}
+      <StickyActions>
+        <Button className="w-full" onClick={save} busy={busy} disabled={!full || !dirty}>
+          {exchange.my_picks.length && !dirty ? (
+            'Questions sent to the vault'
+          ) : (
+            <>
+              Lock {MAX_PROMPTS_PER_PICK} Questions &amp; Send to Vault <span aria-hidden="true">→</span>
+            </>
+          )}
         </Button>
-        {message && (
-          <div className="mt-2 text-center">
-            <Notice tone={message.tone}>{message.text}</Notice>
-          </div>
-        )}
       </StickyActions>
 
       <BottomSheet open={writing} title="Your own question" onClose={() => setWriting(false)}>
@@ -188,9 +222,9 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="What’s a small ritual you’d never give up?"
-          className="w-full resize-none rounded-xl border border-line bg-raised px-4 py-3 text-base outline-none focus:border-brass"
+          className="w-full resize-none rounded-[14px] border border-line bg-canvas px-4 py-3 font-serif text-[1.25rem] leading-snug outline-none placeholder:text-muted/50 focus:border-brass"
         />
-        <p className="mt-1 text-right text-xs text-muted">
+        <p className="mt-1 text-right font-mono text-[11px] text-muted">
           {draft.trim().length}/{CUSTOM_QUESTION_MAX}
         </p>
         <Button className="mt-3 w-full" onClick={addOwn} disabled={draft.trim().length < CUSTOM_QUESTION_MIN}>
@@ -201,15 +235,56 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
   );
 }
 
-function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocked: (x: ExchangeDetail) => void }) {
-  const [drafts, setDrafts] = useState<Record<string, Blob | null>>({});
+// ---------------------------------------------------------------------------
+// Thursday–Friday: answer their 3 questions by voice
+// ---------------------------------------------------------------------------
+function StatusTracker({ exchange, drafted }: { exchange: ExchangeDetail; drafted: number }) {
+  const total = exchange.questions_for_me.length;
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center justify-between rounded-full border border-line bg-panel px-4 py-2.5 text-[13px]">
+          <span className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-brass" /> You
+          </span>
+          <span className="font-mono text-[11px] text-muted">{exchange.i_locked ? 'Locked ✓' : `${drafted}/${total} Drafted`}</span>
+        </div>
+        <div
+          className={cx(
+            'flex items-center justify-between rounded-full border px-4 py-2.5 text-[13px]',
+            exchange.they_locked ? 'border-brass/60 bg-brass/10' : 'border-line bg-panel',
+          )}
+        >
+          <span className="flex items-center gap-2">
+            <span className={cx('h-1.5 w-1.5 rounded-full', exchange.they_locked ? 'bg-brass' : 'animate-pulse bg-muted')} /> Them
+          </span>
+          <span className={cx('font-mono text-[11px]', exchange.they_locked ? 'text-brass' : 'text-muted')}>
+            {exchange.they_locked ? 'Locked ✓' : 'Recording…'}
+          </span>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        <p className="text-[12px] text-muted">Purely human exchange (zero AI scoring)</p>
+        <p className="font-mono text-[11px] text-ink/85">
+          <Countdown to={exchange.answers_close_at} serverNow={exchange.server_now} style="hm" /> left
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AnswerStudio({ exchange, onLocked }: { exchange: ExchangeDetail; onLocked: (x: ExchangeDetail) => void }) {
+  const [drafts, setDrafts] = useState<Record<string, DraftInfo | null>>({});
+  const [active, setActive] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const support = useMemo(() => recordingAvailable(), []);
-  const onDraftChange = useCallback((key: string, blob: Blob | null) => setDrafts((d) => ({ ...d, [key]: blob })), []);
-  const done = exchange.questions_for_me.filter((q) => drafts[q.key]).length;
-  const ready = done === exchange.questions_for_me.length;
+  const onDraftChange = useCallback((key: string, d: DraftInfo | null) => setDrafts((all) => ({ ...all, [key]: d })), []);
+  const questions = exchange.questions_for_me;
+  const drafted = questions.filter((q) => drafts[q.key]).length;
+  const ready = drafted === questions.length;
+  const q = questions[active]!;
 
   const lock = async () => {
     setConfirming(false);
@@ -217,13 +292,13 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
     setError(undefined);
     try {
       const form = new FormData();
-      for (const q of exchange.questions_for_me) {
-        const blob = drafts[q.key]!;
+      for (const item of questions) {
+        const blob = drafts[item.key]!.blob;
         const type = blob.type.split(';')[0] ?? 'audio/webm';
-        form.append(q.key, blob, `${q.key}.${EXTENSION[type] ?? 'webm'}`);
+        form.append(item.key, blob, `${item.key}.${EXTENSION[type] ?? 'webm'}`);
       }
       const res = await api<{ released: boolean; exchange: ExchangeDetail }>(`/exchanges/${exchange.id}/lock`, { method: 'POST', form });
-      await Promise.all(exchange.questions_for_me.map((q) => deleteDraft(exchange.id, q.key)));
+      await Promise.all(questions.map((item) => deleteDraft(exchange.id, item.key)));
       haptic([8, 40, 14]);
       onLocked(res.exchange);
       window.scrollTo({ top: 0 });
@@ -236,42 +311,74 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
 
   return (
     <div>
-      <div className="text-center">
-        <ProgressRing value={done} max={exchange.questions_for_me.length || 1} />
-        <h1 className="mt-3 text-[1.75rem] leading-tight">Answer by voice</h1>
-        <p className="mt-1 text-sm text-muted">
-          Response Clock · <Countdown to={exchange.answers_close_at} serverNow={exchange.server_now} className="text-ink" /> left
-        </p>
+      <StatusTracker exchange={exchange} drafted={drafted} />
+
+      <div role="tablist" className="mt-4 grid gap-1 rounded-[14px] border border-line bg-panel p-1" style={{ gridTemplateColumns: `repeat(${questions.length}, 1fr)` }}>
+        {questions.map((item, i) => {
+          const d = drafts[item.key];
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={active === i}
+              onClick={() => setActive(i)}
+              className={cx(
+                'min-h-[2.75rem] rounded-[10px] font-mono text-[11.5px] transition-colors',
+                active === i ? 'border border-brass/70 text-ink' : 'text-ink/70',
+              )}
+            >
+              Q{i + 1}
+              {d ? ` · ${formatSeconds(d.duration)} ✓` : ''}
+            </button>
+          );
+        })}
       </div>
-      <UnlockPair caption="Both answer to unlock" />
-      <p className="mb-4 text-center text-sm text-muted">Take as many takes as you like. Drafts stay on this phone; nothing is shared until you’ve both sent.</p>
+
+      <section className="surface mt-5 p-5">
+        <div className="flex items-center justify-between">
+          <span className="pill">
+            Question {String(active + 1).padStart(2, '0')} of {String(questions.length).padStart(2, '0')}
+          </span>
+          <span className="text-[12px] text-muted">Asked by your match</span>
+        </div>
+        <p className="mt-4 font-serif text-[1.75rem] leading-[1.12]">“{q.text}”</p>
+        <p className="mt-4 border-t border-line pt-3 text-[12.5px] text-muted">Review locally with no take limits before locking your voice vault.</p>
+      </section>
+
       {!support.ok && (
-        <div className="mb-4">
+        <div className="mt-4">
           <Notice tone="error">{support.reason}</Notice>
         </div>
       )}
-      <div className="space-y-3">
-        {exchange.questions_for_me.map((q) => (
-          <VoiceRecorder key={q.key} exchangeId={exchange.id} promptKey={q.key} question={q.text} disabled={!support.ok || busy} onDraftChange={onDraftChange} />
+      <div className="mt-4">
+        {/* One recorder per question, kept mounted so switching tabs never loses a take. */}
+        {questions.map((item, i) => (
+          <div key={item.key} hidden={i !== active}>
+            <VoiceRecorder exchangeId={exchange.id} promptKey={item.key} disabled={!support.ok || busy} onDraftChange={onDraftChange} />
+          </div>
         ))}
       </div>
-      <StickyActions aboveTabs>
+      {error && (
+        <div className="mt-3">
+          <Notice tone="error">{error}</Notice>
+        </div>
+      )}
+
+      <StickyActions>
         <Button className="w-full" onClick={() => setConfirming(true)} disabled={!ready} busy={busy}>
-          {ready ? 'Send my answers' : `Record ${exchange.questions_for_me.length - done} more`}
+          <Lock size={16} />
+          {ready ? `Lock All ${questions.length} Answers & Unseal Vaults` : `Record ${questions.length - drafted} more to lock`}
         </Button>
-        {error && (
-          <div className="mt-2 text-center">
-            <Notice tone="error">{error}</Notice>
-          </div>
-        )}
       </StickyActions>
-      <BottomSheet open={confirming} title="Send your answers?" onClose={() => setConfirming(false)}>
-        <p className="text-sm text-ink/80">
-          Once sent, they’re final. They stay sealed until they send theirs; then you hear each other and your photos unblur at the same moment.
+
+      <BottomSheet open={confirming} title="Lock your voice vault?" onClose={() => setConfirming(false)}>
+        <p className="text-sm leading-relaxed text-ink/80">
+          Locking is final. The moment they lock theirs, both vaults open together: you hear each other, and photos and first names unblur.
         </p>
         <div className="mt-5 space-y-2">
           <Button className="w-full" onClick={lock}>
-            Send them
+            Lock and seal
           </Button>
           <Button variant="ghost" className="w-full" onClick={() => setConfirming(false)}>
             Keep recording
@@ -282,101 +389,159 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
   );
 }
 
-function AnswerList({ title, answers, onPlay }: { title: string; answers: ExchangeDetail['their_answers']; onPlay?: () => void }) {
+// ---------------------------------------------------------------------------
+// Both vaults unlocked: the modality switch and the First-Meet Bridge
+// ---------------------------------------------------------------------------
+function AnswerPlayer({ answers }: { answers: ExchangeDetail['their_answers'] }) {
+  const [active, setActive] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const audio = useRef<HTMLAudioElement>(null);
+  const shapes = [useAudioShape(answers[0]?.audio_url ?? null), useAudioShape(answers[1]?.audio_url ?? null), useAudioShape(answers[2]?.audio_url ?? null)];
+  const current = answers[active];
+  const duration = shapes[active]?.duration ?? 0;
+
+  const select = (i: number) => {
+    audio.current?.pause();
+    setActive(i);
+    setPosition(0);
+  };
+  const toggle = () => {
+    const el = audio.current;
+    if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
+  };
+  if (!current) return null;
+
   return (
-    <section className="mt-6">
-      <h2 className="mb-2 text-base">{title}</h2>
-      <ul role="list" className="space-y-2.5">
-        {answers.map((a) => (
-          <li key={a.prompt_key} className="rounded-2xl border border-line bg-panel p-4">
-            <p className="text-[0.9375rem] font-medium leading-snug">{a.text}</p>
-            <audio src={a.audio_url} controls preload="none" onPlay={onPlay} className="mt-3 h-10 w-full" />
-          </li>
+    <section className="surface p-3" aria-label="Their voice answers">
+      <div role="tablist" className="grid gap-1 rounded-[12px] border border-line bg-canvas/50 p-1" style={{ gridTemplateColumns: `repeat(${answers.length}, 1fr)` }}>
+        {answers.map((a, i) => (
+          <button
+            key={a.prompt_key}
+            type="button"
+            role="tab"
+            aria-selected={active === i}
+            onClick={() => select(i)}
+            className={cx('min-h-[2.5rem] rounded-[9px] font-mono text-[11px] transition-colors', active === i ? 'border border-brass/70 bg-brass/10 text-ink' : 'text-ink/65')}
+          >
+            Ans {i + 1}
+            {shapes[i] ? ` · ${formatSeconds(shapes[i]!.duration)}` : ''}
+          </button>
         ))}
-      </ul>
+      </div>
+      <div className="mt-3 flex items-center gap-3 px-1 pb-1">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? 'Pause answer' : 'Play answer'}
+          className="btn-copper flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[13px]"
+        >
+          {playing ? '❚❚' : '▶'}
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-serif text-[1.0625rem] italic text-ink/90">“{current.text}”</p>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="h-[3px] flex-1 overflow-hidden rounded-full bg-line">
+              <div className="h-full rounded-full bg-brass transition-[width] duration-200" style={{ width: `${duration ? Math.min(100, (position / duration) * 100) : 0}%` }} />
+            </div>
+            <span className="shrink-0 font-mono text-[10.5px] text-muted">
+              {formatSeconds(position)} / {formatSeconds(duration)}
+            </span>
+          </div>
+        </div>
+      </div>
+      <audio
+        key={current.audio_url}
+        ref={audio}
+        src={current.audio_url}
+        preload="none"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+        className="hidden"
+      />
     </section>
   );
 }
 
-/**
- * The Simultaneous Reveal. The vault opened the instant you both locked; their name and face
- * appear right here on the player the moment you press Play on their voice, and the First-Meet
- * Bridge sits directly underneath.
- */
 function RevealScreen({ exchange }: { exchange: ExchangeDetail }) {
   const revealed = exchange.revealed!;
-  const photo = revealed.photo_ids[0];
-  const [shown, reveal] = useRevealed(exchange.id);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const strip = useRef<HTMLDivElement>(null);
   const matchResource = useResource<MatchDetail>(exchange.match_id ? `/matches/${exchange.match_id}` : null, 60_000);
   const [match, setMatch] = useState<MatchDetail>();
   useEffect(() => {
     if (matchResource.data) setMatch(matchResource.data);
   }, [matchResource.data]);
+  const tagline = [`${exchange.counterpart.distance_km} km away`, exchange.counterpart.interests.slice(0, 2).map((i) => i.label).join(' & ')].join(' · ');
 
   return (
     <div>
-      <div className="text-center">
-        <h1 className="text-[1.75rem] leading-tight">{shown ? 'It’s a Match!' : 'The vault is open'}</h1>
-        <p className="text-lg font-semibold text-brass">{shown ? `Meet ${revealed.first_name}` : 'You both answered. Press play.'}</p>
+      {/* Photo carousel, full-bleed. */}
+      <div className="relative -mx-5 -mt-4 h-[22rem] overflow-hidden">
+        <div
+          ref={strip}
+          className="flex h-full snap-x snap-mandatory overflow-x-auto [scrollbar-width:none]"
+          onScroll={(e) => setPhotoIndex(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+        >
+          {revealed.photo_ids.length > 0 ? (
+            revealed.photo_ids.map((id, i) => (
+              // Plain img: the authenticated, private photo endpoint.
+              <img key={id} src={`/api/photos/${id}`} alt={`${revealed.first_name}, photo ${i + 1}`} className="h-full w-full shrink-0 snap-center animate-fade-in object-cover" />
+            ))
+          ) : (
+            <div className="flex h-full w-full shrink-0 items-center justify-center bg-gradient-to-b from-[#2A2622] to-canvas font-serif text-[7rem] text-brass/60">
+              {revealed.first_name.slice(0, 1)}
+            </div>
+          )}
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-canvas via-canvas/70 to-transparent" />
+        <div className="absolute inset-x-5 top-4 flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Link href="/" aria-label="Back to this week" className="flex h-9 w-9 items-center justify-center rounded-full bg-canvas/60 backdrop-blur">
+              <ChevronLeft size={16} />
+            </Link>
+            <span className="pill bg-canvas/60 uppercase tracking-[0.16em] backdrop-blur">Both vaults unlocked</span>
+          </span>
+          {revealed.photo_ids.length > 1 && (
+            <span className="flex gap-1 rounded-full bg-canvas/60 px-2 py-1.5 backdrop-blur" aria-hidden="true">
+              {revealed.photo_ids.map((id, i) => (
+                <span key={id} className={cx('h-1 rounded-full transition-all', i === photoIndex ? 'w-4 bg-brass' : 'w-1.5 bg-ink/40')} />
+              ))}
+            </span>
+          )}
+        </div>
+        <div className="absolute inset-x-5 bottom-3">
+          <h1 className="text-[2.75rem] leading-none">
+            {revealed.first_name}, {revealed.age}
+          </h1>
+          <p className="mt-1.5 text-[13px] text-ink/75">{tagline}</p>
+        </div>
       </div>
 
-      <section className="mt-4 overflow-hidden rounded-2xl border border-line bg-panel shadow-card" aria-label="Their voice notes">
-        <div className="relative aspect-[4/3] w-full overflow-hidden bg-raised">
-          {photo ? (
-            // Plain img: the authenticated, private photo endpoint.
-            <img
-              src={`/api/photos/${photo}`}
-              alt={shown ? `Photo of ${revealed.first_name}` : ''}
-              className={cx('h-full w-full object-cover transition-[filter,transform] duration-[1400ms] ease-calm', shown ? 'blur-0' : 'scale-110 blur-2xl')}
-            />
-          ) : (
-            <span className={cx('flex h-full w-full items-center justify-center text-7xl font-semibold text-brass/70 transition-[filter] duration-[1400ms]', !shown && 'blur-xl')}>
-              {revealed.first_name.slice(0, 1)}
-            </span>
-          )}
-          {!shown && (
-            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-canvas/70 text-3xl font-semibold text-brass">?</span>
-              <span className="rounded-full bg-canvas/70 px-3 py-1 text-sm">Play their voice to see them</span>
-            </span>
-          )}
-          <span
-            className={cx(
-              'absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-12 text-xl font-semibold transition-opacity duration-700',
-              shown ? 'opacity-100' : 'opacity-0',
-            )}
-          >
-            {revealed.first_name}, {revealed.age}
-          </span>
-        </div>
-        <ul role="list" className="divide-y divide-line">
-          {exchange.their_answers.map((a) => (
-            <li key={a.prompt_key} className="p-4">
-              <p className="text-[0.9375rem] font-medium leading-snug">{a.text}</p>
-              <audio src={a.audio_url} controls preload="none" onPlay={reveal} className="mt-3 h-10 w-full" />
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="mt-4">
+        <AnswerPlayer answers={exchange.their_answers} />
+      </div>
 
-      {shown && match && (
-        <div className="mt-5 space-y-3">
-          {match.status === 'bridging' && <BridgePanel match={match} onUpdated={setMatch} />}
-          {match.event && match.event.status !== 'cancelled' && <EventPanel match={match} onUpdated={setMatch} />}
-          <Link href={`/matches/${match.id}`} className="tap w-full rounded-xl border border-line bg-raised text-sm">
-            Messages and details
+      <div className="mt-5 space-y-3">
+        {match?.status === 'bridging' && <BridgePanel match={match} onUpdated={setMatch} sticky />}
+        {match?.event && match.event.status !== 'cancelled' && <EventPanel match={match} onUpdated={setMatch} />}
+        {match && (
+          <Link href={`/matches/${match.id}`} className="tap w-full rounded-2xl border border-line bg-panel text-[13.5px] text-ink/85">
+            Messages &amp; details
           </Link>
-        </div>
-      )}
-
-      <AnswerList title="Your answers" answers={exchange.my_answers} />
+        )}
+      </div>
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
 export default function ExchangePage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const session = useMemberSession();
   const resource = useResource<ExchangeDetail>(session.ready ? `/exchanges/${id}` : null, 30_000);
   const [exchange, setExchange] = useState<ExchangeDetail>();
@@ -388,38 +553,52 @@ export default function ExchangePage() {
 
   if (!exchange) return resource.error ? <Notice tone="error">{resource.error.message}</Notice> : <Spinner />;
 
+  if (exchange.status === 'released' && exchange.revealed) return <RevealScreen exchange={exchange} />;
+
   return (
     <div>
-      <button type="button" onClick={() => router.push('/')} className="tap -ml-3 rounded-full text-sm text-muted hover:text-ink">
-        ‹ This week
-      </button>
+      <div className="mb-3 flex items-center justify-between">
+        <BackLink />
+        <button type="button" onClick={() => setShowCard(true)} className="tap px-2 text-[13px] text-brass">
+          Their folio
+        </button>
+      </div>
 
       {exchange.status === 'questions' && <QuestionPicker exchange={exchange} onSaved={setExchange} />}
-      {exchange.status === 'answering' && !exchange.i_locked && <AnswerBooth exchange={exchange} onLocked={setExchange} />}
+      {exchange.status === 'answering' && !exchange.i_locked && <AnswerStudio exchange={exchange} onLocked={setExchange} />}
 
       {exchange.status === 'answering' && exchange.i_locked && (
-        <>
-          <ScreenHeader title="Your answers are sent" subtitle="Nothing is shared until they send theirs." />
-          <UnlockPair caption="Waiting for theirs" />
-          <Panel className="p-4 text-center text-sm text-muted">
-            If the Response Clock runs out first (<Countdown to={exchange.answers_close_at} serverNow={exchange.server_now} className="text-ink" />
-            ), it closes quietly and your voice notes are deleted.
-          </Panel>
-          <AnswerList title="Your answers" answers={exchange.my_answers} />
-        </>
+        <div>
+          <StatusTracker exchange={exchange} drafted={exchange.my_answers.length} />
+          <h1 className="mt-6 text-[2.125rem] leading-[1.05]">Your vault is locked</h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
+            It opens the moment they lock theirs. If the Response Clock runs out first, the exchange closes quietly and every recording is
+            deleted.
+          </p>
+          <p className="label-rule mt-8">Your answers</p>
+          <ol className="mt-3 space-y-2.5">
+            {exchange.my_answers.map((a, i) => (
+              <li key={a.prompt_key} className="surface p-4">
+                <p className="label-mono">Answer {String(i + 1).padStart(2, '0')}</p>
+                <p className="mt-1.5 font-serif text-[1.25rem] leading-snug">“{a.text}”</p>
+                <audio src={a.audio_url} controls preload="none" className="mt-3 h-10 w-full" />
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
-
-      {exchange.status === 'released' && exchange.revealed && <RevealScreen exchange={exchange} />}
 
       {exchange.status === 'expired' && (
-        <ScreenHeader title="This one has closed" subtitle="Time ran out before you both answered. Nothing was shared, and the recordings were deleted." />
+        <div className="pt-6">
+          <h1 className="text-[2.125rem] leading-[1.05]">This exchange has closed</h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
+            The Response Clock ran out before you both locked. Nothing was shared, and the recordings were deleted.
+          </p>
+        </div>
       )}
 
-      <Button variant="quiet" className="mt-6 w-full" onClick={() => setShowCard(true)}>
-        View their card
-      </Button>
-      <BottomSheet tall open={showCard} title="Their card" onClose={() => setShowCard(false)}>
-        <CardBody profile={exchange.counterpart} />
+      <BottomSheet tall open={showCard} title="Their folio" onClose={() => setShowCard(false)}>
+        <CardBody profile={exchange.counterpart} compact />
       </BottomSheet>
     </div>
   );

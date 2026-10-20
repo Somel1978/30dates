@@ -15,9 +15,9 @@ export type PromptVector = 'rhythm' | 'repair' | 'joy';
 export const PROMPT_VECTORS: readonly PromptVector[] = ['rhythm', 'repair', 'joy'];
 
 export const PROMPT_VECTOR_LABELS: Record<PromptVector, { title: string; subtitle: string }> = {
-  rhythm: { title: 'Daily rhythm', subtitle: 'How you actually live, day to day' },
-  repair: { title: 'Inner world', subtitle: 'Conflict, repair and vulnerability' },
-  joy: { title: 'Joy & curiosity', subtitle: 'What lights you up' },
+  rhythm: { title: 'Habits', subtitle: 'How they actually live, day to day' },
+  repair: { title: 'Perspectives', subtitle: 'How they handle the hard parts' },
+  joy: { title: 'Curiosities', subtitle: 'What lights them up' },
 };
 
 export interface VoicePrompt {
@@ -121,9 +121,9 @@ export const VOICE_PROMPTS: readonly VoicePrompt[] = [
 
 export const VOICE_PROMPT_BY_KEY: ReadonlyMap<string, VoicePrompt> = new Map(VOICE_PROMPTS.map((p) => [p.key, p]));
 
-/** Each person sends exactly two questions: from the bank, or written themselves. */
-export const MIN_PROMPTS_PER_PICK = 2;
-export const MAX_PROMPTS_PER_PICK = 2;
+/** Each person sends exactly three questions: from the bank, or written themselves. */
+export const MIN_PROMPTS_PER_PICK = 3;
+export const MAX_PROMPTS_PER_PICK = 3;
 export const CUSTOM_QUESTION_MIN = 10;
 export const CUSTOM_QUESTION_MAX = 200;
 /** Longest single voice answer, enforced by the recorder; the server caps file size. */

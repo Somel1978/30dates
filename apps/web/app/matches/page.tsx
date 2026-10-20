@@ -3,13 +3,13 @@
 import type { MatchSummary } from '@thirtydates/shared';
 import Link from 'next/link';
 import { ChevronRight } from '@/components/icons';
-import { Notice, Panel, ScreenHeader, Spinner } from '@/components/primitives';
+import { Notice, ScreenHeader, Spinner } from '@/components/primitives';
 import { useResource } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useMemberSession } from '@/lib/session';
 
 const STATUS: Record<MatchSummary['status'], string> = {
-  bridging: 'Propose a meet-up',
+  bridging: 'Propose a 45-min window',
   scheduled: 'Meeting scheduled',
   raincheck_pending: 'Raincheck pending',
   met: 'You’ve met',
@@ -26,33 +26,25 @@ export default function MatchesPage() {
     <div>
       <ScreenHeader title="Matches" subtitle="Made the moment you’ve both answered by voice." />
       {matches.data.length === 0 ? (
-        <Panel className="p-6 text-center">
-          <p className="font-medium">No matches yet</p>
-          <p className="mt-1 text-sm text-muted">They’re rare on purpose. Each one starts with a Monday batch.</p>
-        </Panel>
+        <p className="mt-6 font-serif text-[1.5rem] leading-snug text-ink/80">No matches yet. They’re rare on purpose; each one starts with a Monday batch.</p>
       ) : (
-        <ul role="list" className="space-y-2.5">
+        <ul role="list">
           {matches.data.map((m) => (
-            <li key={m.id}>
-              <Link
-                href={`/matches/${m.id}`}
-                className={`flex min-h-[4.5rem] items-center gap-3.5 rounded-2xl border bg-panel px-4 py-3 shadow-card ${
-                  m.status === 'expired' ? 'border-line opacity-60' : 'border-brass/50'
-                }`}
-              >
+            <li key={m.id} className={m.status === 'expired' ? 'opacity-50' : undefined}>
+              <Link href={`/matches/${m.id}`} className="flex items-center gap-4 border-b border-line py-5">
                 {m.counterpart.photo_ids[0] ? (
                   // Plain img: the authenticated, private photo endpoint.
-                  <img src={`/api/photos/${m.counterpart.photo_ids[0]}`} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  <img src={`/api/photos/${m.counterpart.photo_ids[0]}`} alt="" className="h-14 w-14 rounded-full object-cover" />
                 ) : (
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pine text-lg font-semibold" aria-hidden="true">
+                  <span className="flex h-14 w-14 items-center justify-center rounded-full border border-brass/40 font-serif text-2xl text-brass" aria-hidden="true">
                     {m.counterpart.first_name.slice(0, 1)}
                   </span>
                 )}
                 <span className="flex-1">
-                  <span className="block font-medium">
+                  <span className="block font-serif text-[1.625rem] leading-tight">
                     {m.counterpart.first_name}, {m.counterpart.age}
                   </span>
-                  <span className="block text-[0.8125rem] text-muted">
+                  <span className="mt-1 block font-mono text-[10.5px] uppercase tracking-[0.14em] text-brass">
                     {m.event && m.status === 'scheduled' ? `Meeting ${formatDateTime(m.event.starts_at)}` : STATUS[m.status]}
                   </span>
                 </span>

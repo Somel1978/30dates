@@ -31,7 +31,7 @@ describe('test tools', () => {
     expect(view.phase).toBe('exchange_questions');
     expect(view.exchanges).toHaveLength(3);
     expect(await counterpartsAct(ctx, me)).toEqual({ picked: 3, locked: 0 });
-    for (const x of view.exchanges) await pickPrompts(ctx, me, x.id, VOICE_PROMPTS.slice(2, 4).map((p) => p.key));
+    for (const x of view.exchanges) await pickPrompts(ctx, me, x.id, VOICE_PROMPTS.slice(2, 5).map((p) => p.key));
 
     await moveClock(ctx, 'thursday');
     expect(await counterpartsAct(ctx, me)).toEqual({ picked: 0, locked: 3 });

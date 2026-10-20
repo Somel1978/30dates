@@ -78,6 +78,8 @@ export interface CardInterest {
 /** A faceless, nameless Monday card: Life Rhythm, behavioral interests and the coin. No gates. */
 export interface CardProfile {
   user_id: string;
+  /** "Early 40s": a decade band, never the exact age (that is revealed with the name). */
+  age_band: string;
   distance_km: number;
   rhythm: string[];
   interests: CardInterest[];
@@ -100,6 +102,8 @@ export interface ExchangeSummary {
   counterpart: CardProfile;
   my_pick_count: number;
   i_locked: boolean;
+  /** Whether they have locked their answers (shown on the status tracker; their audio stays sealed). */
+  they_locked: boolean;
   questions_close_at: string;
   answers_close_at: string;
   /** Set the instant both have locked: the simultaneous modality switch. */
@@ -155,6 +159,8 @@ export interface VenueDto {
   venue_type: 'specialty_coffee' | 'wine_bar';
   lat: number;
   lng: number;
+  /** Distance from the geographic midpoint of the pair (suggested venue only). */
+  midpoint_km?: number;
 }
 
 export interface BridgeEventDto {

@@ -131,6 +131,7 @@ async function summarise(tx: Tx, rows: ExchangeRow[], userId: string): Promise<E
       counterpart: profile,
       my_pick_count: (await picksBy(tx, x.id, userId)).length,
       i_locked: lockedAt(x, userId) !== null,
+      they_locked: lockedAt(x, other) !== null,
       questions_close_at: x.questions_close_at.toISOString(),
       answers_close_at: x.answers_close_at.toISOString(),
       revealed: x.status === 'released' ? (identities.get(other) ?? null) : null,
@@ -394,9 +395,9 @@ export async function runExchangeTick(ctx: AppContext): Promise<TickSummary> {
     for (const x of starting.rows) {
       for (const picker of [x.user_a_id, x.user_b_id]) {
         if ((await picksBy(tx, x.id, picker)).length > 0) continue;
-        // One everyday-rhythm question and one joy question, chosen deterministically.
+        // One question from each set, chosen deterministically.
         const seed = fnv1a(`${x.id}:${picker}`);
-        const keys = (['rhythm', 'joy'] as const).map((v) => {
+        const keys = (['rhythm', 'repair', 'joy'] as const).map((v) => {
           const bank = VOICE_PROMPTS.filter((p) => p.vector === v);
           return bank[seed % bank.length]!.key;
         });

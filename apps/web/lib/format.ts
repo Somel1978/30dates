@@ -58,3 +58,10 @@ export function formatLeft(ms: number): string {
   const minutes = Math.max(1, Math.floor(ms / 60_000));
   return `${minutes} ${minutes === 1 ? 'Minute' : 'Minutes'} Left`;
 }
+
+/** "31h 40m" (total hours), for mono countdowns. */
+export function formatHm(ms: number): string {
+  if (ms <= 0) return '0h 00m';
+  const minutes = Math.floor(ms / 60_000);
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}

@@ -3,60 +3,71 @@
 import { addLocalDays, localParts, zonedTimeToUtc, type MatchDetail } from '@thirtydates/shared';
 import { useMemo, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import { formatDateTime, haptic } from '@/lib/format';
-import { Calendar, ChevronLeft, ChevronRight, Cup, Pin, Wine } from './icons';
-import { Button, Notice, cx } from './primitives';
+import { haptic } from '@/lib/format';
+import { Check, Pin } from './icons';
+import { Button, Notice, StickyActions, cx } from './primitives';
 
 const LOCAL_TIMES: [number, number][] = [
   [9, 0],
+  [11, 0],
   [12, 30],
   [16, 0],
   [18, 30],
-  [20, 0],
+  [19, 0],
 ];
 const LEAD_MS = 3 * 3_600_000;
 
-interface DaySlots {
+interface Slot {
+  iso: string;
   label: string;
-  slots: { iso: string; label: string; evening: boolean }[];
+  long: string;
 }
 
-/** Candidate slots in the match's zone between now (+3 h notice) and the end of the 72-hour window. */
-function candidateSlots(timeZone: string, now: Date, windowEnd: Date): DaySlots[] {
+/** Bookable starts in the match's zone between now (+3 h notice) and the end of the 72-hour window. */
+function candidateSlots(timeZone: string, now: Date, windowEnd: Date): Slot[] {
   const today = localParts(now, timeZone);
-  const days: DaySlots[] = [];
+  const out: Slot[] = [];
+  const short = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone });
+  const long = new Intl.DateTimeFormat(undefined, { weekday: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone });
   for (let d = 0; d < 4; d++) {
     const day = addLocalDays(today, d);
-    const slots = LOCAL_TIMES.map(([hour, minute]) => ({ at: zonedTimeToUtc({ ...day, hour, minute }, timeZone), hour }))
-      .filter(({ at }) => at.getTime() >= now.getTime() + LEAD_MS && at.getTime() <= windowEnd.getTime())
-      .map(({ at, hour }) => ({
-        iso: at.toISOString(),
-        label: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone }).format(at),
-        evening: hour >= 17,
-      }));
-    if (slots.length === 0) continue;
-    const noon = zonedTimeToUtc({ ...day, hour: 12, minute: 0 }, timeZone);
-    days.push({ label: new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone }).format(noon), slots });
+    for (const [hour, minute] of LOCAL_TIMES) {
+      const at = zonedTimeToUtc({ ...day, hour, minute }, timeZone);
+      if (at.getTime() < now.getTime() + LEAD_MS || at.getTime() > windowEnd.getTime()) continue;
+      out.push({ iso: at.toISOString(), label: short.format(at).replace(',', ''), long: long.format(at).replace(',', '') });
+    }
   }
-  return days;
+  return out;
 }
 
+const VENUE_KIND = { specialty_coffee: 'Specialty Coffee', wine_bar: 'Espresso & Wine' } as const;
+
 /**
- * Propose a Meet-Up: a 45-minute coffee or wine at a curated venue near the midpoint, within 72
- * hours of the match. Each person privately marks every time they could do; nobody "asks out",
- * and the meeting confirms itself at the earliest time you share.
+ * The First-Meet Bridge: an invitation to a 45-minute coffee or wine audit at the venue chosen
+ * near your geographic midpoint, within 72 hours. Tap every time you could do; nobody "asks out",
+ * and it confirms itself at the earliest time you both proposed.
  */
-export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdated: (next: MatchDetail) => void }) {
+export function BridgePanel({
+  match,
+  onUpdated,
+  sticky = false,
+}: {
+  match: MatchDetail;
+  onUpdated: (next: MatchDetail) => void;
+  /** Put the Propose button in the bottom action bar (the reveal screen). */
+  sticky?: boolean;
+}) {
   const mine = match.bridge.my_preference;
   const [selected, setSelected] = useState<Set<string>>(() => new Set(mine?.slots ?? []));
-  const [dayIndex, setDayIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const windowEnd = useMemo(() => new Date(match.bridge_window_closes_at), [match.bridge_window_closes_at]);
   // The server clock decides what's bookable; a wrong device clock must not offer past slots.
-  const days = useMemo(() => candidateSlots(match.time_zone, new Date(match.server_now), windowEnd), [match.time_zone, match.server_now, windowEnd]);
-  const day = days[Math.min(dayIndex, days.length - 1)];
+  const slots = useMemo(() => candidateSlots(match.time_zone, new Date(match.server_now), windowEnd), [match.time_zone, match.server_now, windowEnd]);
   const venue = match.suggested_venue;
+  const venueName = venue?.name ?? 'a curated venue';
+  const chosen = slots.filter((s) => selected.has(s.iso));
+  const dirty = [...selected].sort().join() !== [...(mine?.slots ?? [])].sort().join();
 
   const toggle = (iso: string) =>
     setSelected((s) => {
@@ -71,111 +82,93 @@ export function BridgePanel({ match, onUpdated }: { match: MatchDetail; onUpdate
     setError(undefined);
     try {
       const next = await api<MatchDetail>(`/matches/${match.id}/bridge`, { method: 'PUT', body: { mode: 'coffee_audit', slots: [...selected] } });
-      haptic(10);
+      haptic([8, 40, 14]);
       onUpdated(next);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save');
+      setError(err instanceof ApiError ? err.message : 'Could not send');
     } finally {
       setBusy(false);
     }
   };
 
-  return (
-    <section className="rounded-t-[1.75rem] rounded-b-2xl border border-line bg-panel px-4 pb-4 pt-3 shadow-sheet" aria-labelledby="meetup-heading">
-      <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
-      <h2 id="meetup-heading" className="text-center text-lg">
-        Propose a Meet-Up
-      </h2>
-      <p className="mt-0.5 text-center text-xs text-muted">45 minutes · before {formatDateTime(match.bridge_window_closes_at)}</p>
+  let label: string;
+  if (chosen.length === 0) label = 'Tap a time to propose';
+  else if (mine && !dirty) label = 'Proposed · waiting for a shared time';
+  else if (chosen.length === 1) label = `Propose ${chosen[0]!.long} at ${venueName}`;
+  else label = `Propose ${chosen.length} windows at ${venueName}`;
+  const ready = chosen.length > 0 && (!mine || dirty);
 
-      {days.length === 0 ? (
-        <div className="mt-4">
-          <Notice>There are no bookable times left before the window closes.</Notice>
+  const action = (
+    <Button className="w-full" onClick={save} busy={busy} disabled={!ready}>
+      <span className="min-w-0 truncate">{label}</span>
+      {ready && <Check size={16} className="shrink-0" />}
+    </Button>
+  );
+
+  return (
+    <section
+      className="rounded-[18px] border border-brass/25 bg-gradient-to-b from-[#17181D] to-panel p-4 shadow-[inset_0_1px_0_rgb(255_236_210/0.08),inset_0_-1px_0_rgb(0_0_0/0.4),0_18px_40px_-24px_rgb(0_0_0/0.8)]"
+      aria-labelledby="bridge-heading"
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 id="bridge-heading" className="whitespace-nowrap font-mono text-[10.5px] uppercase tracking-[0.12em] text-brass">
+          First-Meet Bridge · 45-min audit
+        </h2>
+        <span className="whitespace-nowrap font-mono text-[10.5px] text-muted">72h window</span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-line bg-canvas/50 p-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-brass/40 text-brass">
+          <Pin size={18} />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-medium">
+            {venueName}
+            {venue && <span className="text-ink/80"> · {VENUE_KIND[venue.venue_type]}</span>}
+          </p>
+          <p className="truncate text-[12px] text-muted">
+            {venue?.midpoint_km !== undefined ? `${venue.midpoint_km} km geographic midpoint` : 'Near your geographic midpoint'}
+            {venue && ` · ${venue.address}`}
+          </p>
+        </div>
+      </div>
+
+      {slots.length === 0 ? (
+        <div className="mt-3">
+          <Notice>There are no bookable times left in the window.</Notice>
         </div>
       ) : (
-        <>
-          <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
-            <div className="flex flex-col items-center justify-center rounded-xl border border-line bg-raised px-3 py-2 text-center">
-              <Calendar size={16} className="text-brass" />
-              <span className="mt-0.5 text-[0.6875rem] text-muted">next 3 days</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl border border-line bg-raised px-1">
-              <button type="button" className="tap rounded-lg text-muted disabled:opacity-30" disabled={dayIndex === 0} onClick={() => setDayIndex((i) => i - 1)} aria-label="Previous day">
-                <ChevronLeft size={18} />
-              </button>
-              <span className="text-sm font-medium">{day?.label}</span>
-              <button
-                type="button"
-                className="tap rounded-lg text-muted disabled:opacity-30"
-                disabled={dayIndex >= days.length - 1}
-                onClick={() => setDayIndex((i) => i + 1)}
-                aria-label="Next day"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {day?.slots.map((slot) => (
-              <button
-                key={slot.iso}
-                type="button"
-                aria-pressed={selected.has(slot.iso)}
-                onClick={() => toggle(slot.iso)}
-                className={cx(
-                  'min-h-[2.75rem] flex-1 basis-[5.5rem] rounded-xl border text-sm font-medium transition-colors',
-                  selected.has(slot.iso) ? 'border-brass bg-brass/15 text-ink' : 'border-line bg-raised text-muted',
-                )}
-              >
-                {slot.label}
-                <span className="block text-[0.6875rem] font-normal opacity-70">{slot.evening ? 'wine' : 'coffee'}</span>
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-muted">
-            Mark every time you could do: {selected.size === 0 ? 'none yet' : `${selected.size} marked`}. It’s private, and confirms itself at the earliest time you share.
-          </p>
-        </>
-      )}
-
-      <ul role="list" className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-raised">
-        <li className="flex min-h-[3rem] items-center gap-3 px-3">
-          <Cup size={18} className="text-brass" />
-          <span className="flex-1 text-sm">
-            Coffee at <span className="font-medium">{venue?.venue_type === 'specialty_coffee' ? venue.name : 'a curated café'}</span>
-          </span>
-        </li>
-        <li className="flex min-h-[3rem] items-center gap-3 px-3">
-          <Wine size={18} className="text-brass" />
-          <span className="flex-1 text-sm">
-            Wine at <span className="font-medium">{venue?.venue_type === 'wine_bar' ? venue.name : 'a wine bar nearby'}</span>
-            <span className="text-muted"> · evenings</span>
-          </span>
-        </li>
-        {venue && (
-          <li>
-            <a
-              className="flex min-h-[3rem] items-center gap-3 px-3 text-sm text-muted hover:text-ink"
-              href={`https://www.openstreetmap.org/?mlat=${venue.lat}&mlon=${venue.lng}#map=17/${venue.lat}/${venue.lng}`}
-              target="_blank"
-              rel="noreferrer"
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {slots.map((slot) => (
+            <button
+              key={slot.iso}
+              type="button"
+              aria-pressed={selected.has(slot.iso)}
+              onClick={() => toggle(slot.iso)}
+              className={cx(
+                'min-h-[2.75rem] rounded-[12px] border text-[13px] transition-colors',
+                selected.has(slot.iso) ? 'border-brass bg-brass/15 text-ink' : 'border-line bg-canvas/40 text-ink/75 hover:border-muted/40',
+              )}
             >
-              <Pin size={18} className="text-brass" />
-              Near your midpoint · {venue.address}
-            </a>
-          </li>
-        )}
-      </ul>
-
-      <Button className="mt-4 w-full" onClick={save} busy={busy} disabled={selected.size === 0}>
-        {mine ? 'Update Date Proposal' : 'Confirm Date Proposal'}
-      </Button>
-      <div className="mt-2 text-center">
-        {match.bridge.state === 'no_venue_nearby' && <Notice tone="error">No partner venue covers your midpoint yet.</Notice>}
-        {mine && match.bridge.state === 'awaiting_alignment' && <Notice>Proposed. Waiting for a time you both marked; nothing is sent to them.</Notice>}
-        {error && <Notice tone="error">{error}</Notice>}
-      </div>
+              {slot.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="mt-3 text-[12px] leading-relaxed text-muted">
+        Tap every time you could do. It stays private and confirms itself at the earliest time you both proposed.
+      </p>
+      {match.bridge.state === 'no_venue_nearby' && (
+        <div className="mt-2">
+          <Notice tone="error">No partner venue covers your midpoint yet.</Notice>
+        </div>
+      )}
+      {error && (
+        <div className="mt-2">
+          <Notice tone="error">{error}</Notice>
+        </div>
+      )}
+      {sticky ? <StickyActions>{action}</StickyActions> : <div className="mt-4">{action}</div>}
     </section>
   );
 }

@@ -12,9 +12,9 @@ export { cx };
 type ButtonVariant = 'primary' | 'quiet' | 'ghost' | 'brass';
 
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: 'btn-gold hover:brightness-105 disabled:opacity-40 disabled:shadow-none',
-  brass: 'border border-brass/60 text-brass hover:bg-brass/10 disabled:opacity-40',
-  quiet: 'border border-line bg-raised text-ink hover:border-muted disabled:opacity-40',
+  primary: 'btn-copper hover:brightness-105 disabled:opacity-35 disabled:shadow-none',
+  brass: 'border border-brass/50 text-brass hover:bg-brass/10 disabled:opacity-40',
+  quiet: 'border border-line bg-panel text-ink hover:border-muted/50 disabled:opacity-40',
   ghost: 'text-muted hover:text-ink disabled:opacity-40',
 };
 
@@ -32,7 +32,7 @@ export function Button({
       disabled={props.disabled || busy}
       aria-busy={busy || undefined}
       className={cx(
-        'tap gap-2 whitespace-nowrap rounded-xl px-5 text-[0.9375rem] font-medium transition duration-200 ease-calm disabled:cursor-not-allowed',
+        'tap min-h-[3.25rem] gap-2 whitespace-nowrap rounded-2xl px-5 text-[0.9375rem] font-medium transition duration-200 ease-calm disabled:cursor-not-allowed',
         buttonStyles[variant],
         className,
       )}
@@ -59,7 +59,7 @@ export function Badge({ children, tone = 'default' }: { children: ReactNode; ton
 
 /** A raised surface; the building block for cards, sheets and panels. */
 export function Panel({ children, className, as: Tag = 'section' }: { children: ReactNode; className?: string; as?: 'section' | 'div' | 'article' }) {
-  return <Tag className={cx('rounded-2xl border border-line bg-panel shadow-card', className)}>{children}</Tag>;
+  return <Tag className={cx('surface', className)}>{children}</Tag>;
 }
 
 /** Screen title block: optional back chevron, a title and a quiet subtitle. */
@@ -83,23 +83,25 @@ export function ScreenHeader({
           <ChevronLeft size={22} />
         </button>
       )}
-      <h1 className="text-[1.75rem] leading-tight">{title}</h1>
-      {subtitle && <p className="mt-1.5 text-sm text-muted">{subtitle}</p>}
+      <h1 className="text-[2.125rem] leading-[1.05]">{title}</h1>
+      {subtitle && <p className="mt-2 text-sm leading-relaxed text-muted">{subtitle}</p>}
       {children}
     </header>
   );
 }
 
-/** Thin gold progress bar with an "n/total" counter, as on the onboarding steps. */
+/** Step index for multi-step flows: "STEP 02 / 05" over short hairline segments. */
 export function ProgressBar({ value, max }: { value: number; max: number }) {
   return (
-    <div className="flex items-center gap-3" role="progressbar" aria-valuemin={0} aria-valuemax={max} aria-valuenow={value}>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
-        <div className="h-full rounded-full bg-gradient-to-r from-[#C49A42] to-[#E9CD82] transition-[width] duration-500 ease-calm" style={{ width: `${(value / max) * 100}%` }} />
+    <div role="progressbar" aria-valuemin={0} aria-valuemax={max} aria-valuenow={value}>
+      <p className="label-mono">
+        Step {String(value).padStart(2, '0')} / {String(max).padStart(2, '0')}
+      </p>
+      <div className="mt-2 flex gap-1.5">
+        {Array.from({ length: max }, (_, i) => (
+          <span key={i} className={cx('h-px flex-1 transition-colors duration-500', i < value ? 'bg-brass' : 'bg-line')} />
+        ))}
       </div>
-      <span className="text-sm tabular-nums text-muted">
-        {value}/{max}
-      </span>
     </div>
   );
 }
@@ -110,10 +112,14 @@ export function Radio({ checked }: { checked: boolean }) {
       aria-hidden="true"
       className={cx(
         'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
-        checked ? 'border-brass' : 'border-muted/50',
+        checked ? 'border-brass bg-brass' : 'border-muted/40',
       )}
     >
-      {checked && <span className="h-2.5 w-2.5 rounded-full bg-brass" />}
+      {checked && (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1A130B" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m5 12.5 4.5 4.5L19 7.5" />
+        </svg>
+      )}
     </span>
   );
 }
@@ -143,15 +149,15 @@ export function OptionRow({
       disabled={disabled}
       aria-pressed={selected}
       className={cx(
-        'flex min-h-[4.25rem] w-full items-center gap-3.5 rounded-2xl border px-4 py-3 text-left transition-colors duration-200 disabled:opacity-40',
-        selected ? 'border-brass/70 bg-brass/[0.08]' : 'border-line bg-panel hover:border-muted/60',
+        'flex min-h-[4.25rem] w-full items-center gap-3.5 rounded-[14px] border px-4 py-3 text-left transition-colors duration-200 disabled:opacity-40',
+        selected ? 'border-brass/70 bg-gradient-to-b from-brass/[0.10] to-brass/[0.03]' : 'border-line bg-panel hover:border-muted/40',
       )}
     >
       {icon && (
         <span
           className={cx(
             'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-            selected ? 'bg-brass/20 text-brass' : 'bg-raised text-brass/90',
+            selected ? 'text-brass' : 'text-brass/80',
           )}
         >
           {icon}
@@ -166,12 +172,20 @@ export function OptionRow({
   );
 }
 
-/** Bottom action area that stays under the thumb, above the tab bar. */
+/** Bottom action bar pinned under the thumb, fading the page out behind it. */
 export function StickyActions({ children, aboveTabs = false }: { children: ReactNode; aboveTabs?: boolean }) {
   return (
-    <div className={cx('sticky z-30 -mx-5 mt-6 bg-gradient-to-t from-canvas via-canvas/95 to-transparent px-5 pb-4 pt-6', aboveTabs ? 'bottom-16' : 'bottom-0')}>
-      {children}
-    </div>
+    <>
+      <div className="h-28" aria-hidden="true" />
+      <div
+        className={cx(
+          'fixed inset-x-0 z-30 border-t border-line/70 bg-canvas/85 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl',
+          aboveTabs ? 'bottom-16' : 'bottom-0',
+        )}
+      >
+        <div className="mx-auto max-w-md px-5">{children}</div>
+      </div>
+    </>
   );
 }
 
@@ -236,7 +250,7 @@ export function BottomSheet({
         )}
       >
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
-        <h2 className="mb-3 text-xl">{title}</h2>
+        <h2 className="mb-3 text-[1.625rem] leading-tight">{title}</h2>
         {children}
       </div>
     </div>

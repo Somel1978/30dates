@@ -62,25 +62,25 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-10">
       <ScreenHeader title={p.first_name} subtitle={session.me.email} />
 
       <section aria-labelledby="photos-heading">
-        <h2 id="photos-heading" className="text-base">
+        <h2 id="photos-heading" className="label-rule font-mono">
           Your photos
         </h2>
-        <p className="mb-3 text-[0.8125rem] text-muted">Blurred to everyone until you’ve both answered by voice.</p>
+        <p className="mb-3 mt-2 text-[13px] text-muted">Unblurred only when both vaults unlock after the voice exchange.</p>
         <PhotoUploader photos={session.me.photos} onChange={() => void session.reload()} />
       </section>
 
       <section aria-labelledby="preview-heading">
-        <h2 id="preview-heading" className="text-base">
-          Your card, as others see it
+        <h2 id="preview-heading" className="label-rule font-mono">
+          Your folio, as others see it
         </h2>
-        <p className="mb-3 text-[0.8125rem] text-muted">No name and no photo, just how you live.</p>
-        <Panel className="p-4">
+        <p className="mb-5 mt-2 text-[13px] text-muted">No name and no photo, just how you live.</p>
+        <div>
           <CardBody profile={p.preview} />
-        </Panel>
+        </div>
       </section>
 
       <Button variant="quiet" className="w-full" onClick={() => setEditing(true)}>

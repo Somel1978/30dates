@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 import {
   INTEREST_CATALOG,
   VOICE_PROMPTS,
@@ -19,6 +20,7 @@ import { runMondayBatch } from '../matching/matching.js';
 import { selectProfile } from './escrow.js';
 import { lockAnswers, pickPrompts } from './exchange.js';
 import { completeOnboarding, onboardingSchema } from './onboarding.js';
+import { addPhoto } from './photos.js';
 
 /**
  * Development-only test tools. Lets one person walk the whole weekly ritual in minutes: seed
@@ -129,8 +131,83 @@ export async function seedMembersAround(ctx: AppContext, userId: string, count: 
         interests: interests.map((d) => ({ key: d.key, receipt: d.receiptHint })),
       }),
     );
+    // Two abstract test photos each, so the reveal carousel has something to show.
+    for (const variant of [0, 1]) await addPhoto(ctx, rows[0]!.id, testPhotoPng(i * 2 + variant));
   }
+  await ensureVenuesNear(ctx, me.lat, me.lng);
   return count;
+}
+
+/** A coffee house and a wine bar a few hundred metres away, so the First-Meet Bridge has a venue. */
+async function ensureVenuesNear(ctx: AppContext, lat: number, lng: number): Promise<void> {
+  const near = await ctx.db.query(
+    `SELECT 1 FROM partner_venues WHERE is_active AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography, 3000)`,
+    [lat, lng],
+  );
+  if (near.rowCount) return;
+  await ctx.db.query(
+    `INSERT INTO partner_venues (name, venue_type, address, geom, curation_score) VALUES
+       ('Ritual Roasters', 'specialty_coffee', 'Test venue · 12 Market Lane', ST_SetSRID(ST_MakePoint($2 + 0.002, $1 + 0.001), 4326), 4.6),
+       ('The Vine Loft', 'wine_bar', 'Test venue · 3 Harbour Steps', ST_SetSRID(ST_MakePoint($2 - 0.002, $1 + 0.002), 4326), 4.8)`,
+    [lat, lng],
+  );
+}
+
+/** Abstract warm "light study" PNG (no faces, no silhouettes), unique per seed. */
+export function testPhotoPng(seed: number, width = 360, height = 480): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf: Buffer) => {
+    let c = 0xffffffff;
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff]! ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const hue = (seed * 47) % 360;
+  const tone = (h: number, l: number): [number, number, number] => {
+    const a = 0.45 * Math.min(l, 1 - l);
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+    };
+    return [f(0), f(8), f(4)];
+  };
+  const [cx1, cy1] = [0.3 + ((seed * 13) % 40) / 100, 0.25 + ((seed * 7) % 30) / 100];
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width * 3 + 1)] = 0;
+    for (let x = 0; x < width; x++) {
+      const u = x / width;
+      const v = y / height;
+      const glow = Math.exp(-((u - cx1) ** 2 + (v - cy1) ** 2) * 7);
+      const [r, g, b] = tone((hue + 25 * v) % 360, 0.12 + 0.5 * glow + 0.08 * (1 - v));
+      const o = y * (width * 3 + 1) + 1 + x * 3;
+      raw[o] = r;
+      raw[o + 1] = g;
+      raw[o + 2] = b;
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // truecolour
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 export async function dealNow(ctx: AppContext) {
@@ -203,7 +280,7 @@ export async function counterpartsAct(ctx: AppContext, userId: string): Promise<
   let locked = 0;
   for (const x of rows) {
     if (x.status === 'questions') {
-      await pickPrompts(ctx, x.other, x.id, VOICE_PROMPTS.slice(0, 2).map((p) => p.key));
+      await pickPrompts(ctx, x.other, x.id, VOICE_PROMPTS.slice(0, 3).map((p) => p.key));
       picked++;
     } else if (x.status === 'answering' && !x.other_locked) {
       const mine = await ctx.db.query<{ prompt_key: string }>(

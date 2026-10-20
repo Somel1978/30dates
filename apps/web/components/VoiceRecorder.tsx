@@ -2,12 +2,14 @@
 
 import { MAX_ANSWER_SECONDS } from '@thirtydates/shared';
 import { useEffect, useRef, useState } from 'react';
+import { analyseAudio, formatClock } from '@/lib/audio';
 import { deleteDraft, loadDraft, saveDraft } from '@/lib/drafts';
-import { Check, Mic } from './icons';
 import { haptic } from '@/lib/format';
+import { Mic } from './icons';
 import { cx } from './primitives';
 
 const MIME_PREFERENCES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+const BARS = 30;
 
 function pickMimeType(): string | undefined {
   if (typeof MediaRecorder === 'undefined') return undefined;
@@ -24,53 +26,95 @@ export function recordingAvailable(): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
+/** Copper bar waveform; bars before `progress` (0..1) are lit. */
+export function Waveform({ peaks, progress = 1, live = false }: { peaks: number[]; progress?: number; live?: boolean }) {
+  const bars = peaks.length ? peaks : Array.from({ length: BARS }, (_, i) => 0.12 + 0.06 * Math.sin(i));
+  return (
+    <div className="flex h-12 items-center gap-[3px]" aria-hidden="true">
+      {bars.map((p, i) => (
+        <span
+          key={i}
+          className={cx(
+            'w-[3px] flex-1 rounded-full transition-[height] duration-150',
+            !peaks.length ? 'bg-line' : i / bars.length < progress ? 'bg-brass' : 'bg-brass/30',
+            live && 'bg-accent',
+          )}
+          style={{ height: `${Math.max(10, Math.round(p * 100))}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export interface DraftInfo {
+  blob: Blob;
+  duration: number;
+}
+
 /**
- * One answer. Record, listen back and re-record as often as you like: drafts stay on this
- * device (local draft buffer) and nothing uploads until you lock. There are deliberately no
- * editing tools; only the Response Clock limits how long you deliberate.
+ * One answer's recorder. Record, play back and re-record as often as you like: drafts stay on
+ * this device (local draft buffer) and nothing uploads until you lock. No editing tools; only
+ * the Response Clock limits how long you deliberate.
  */
 export function VoiceRecorder({
   exchangeId,
   promptKey,
-  question,
   disabled,
   onDraftChange,
 }: {
   exchangeId: string;
   promptKey: string;
-  question: string;
   disabled: boolean;
-  onDraftChange: (promptKey: string, blob: Blob | null) => void;
+  onDraftChange: (promptKey: string, draft: DraftInfo | null) => void;
 }) {
-  const [draftUrl, setDraftUrl] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ url: string; duration: number; peaks: number[] } | null>(null);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [livePeaks, setLivePeaks] = useState<number[]>([]);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
   const [error, setError] = useState<string>();
   const recorder = useRef<MediaRecorder | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  const audio = useRef<HTMLAudioElement>(null);
   const onChange = useRef(onDraftChange);
   onChange.current = onDraftChange;
 
-  const showDraft = (blob: Blob | null) => {
-    setDraftUrl((old) => {
-      if (old) URL.revokeObjectURL(old);
-      return blob ? URL.createObjectURL(blob) : null;
+  const showDraft = async (blob: Blob | null) => {
+    if (!blob) {
+      setDraft((old) => {
+        if (old) URL.revokeObjectURL(old.url);
+        return null;
+      });
+      onChange.current(promptKey, null);
+      return;
+    }
+    let shape = { duration: 0, peaks: [] as number[] };
+    try {
+      shape = await analyseAudio(blob, BARS);
+    } catch {
+      // Undecodable here (rare codec): still playable and uploadable.
+    }
+    setDraft((old) => {
+      if (old) URL.revokeObjectURL(old.url);
+      return { url: URL.createObjectURL(blob), ...shape };
     });
-    onChange.current(promptKey, blob);
+    onChange.current(promptKey, { blob, duration: shape.duration });
   };
 
   // Restore a draft saved earlier on this device.
   useEffect(() => {
     let cancelled = false;
+    setDraft(null);
+    setPosition(0);
     void loadDraft(exchangeId, promptKey).then((blob) => {
-      if (!cancelled && blob) showDraft(blob);
+      if (!cancelled && blob) void showDraft(blob);
     });
     return () => {
       cancelled = true;
       recorder.current?.stream.getTracks().forEach((t) => t.stop());
       window.clearInterval(timer.current);
     };
-    // Restore once per question.
   }, [exchangeId, promptKey]);
 
   const stop = () => {
@@ -80,18 +124,26 @@ export function VoiceRecorder({
 
   const start = async () => {
     setError(undefined);
+    audio.current?.pause();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       const mimeType = pickMimeType();
       const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: Blob[] = [];
+      // Live level meter while recording.
+      const ctx = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
       rec.ondataavailable = (e) => e.data.size > 0 && chunks.push(e.data);
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        void ctx.close();
         setRecording(false);
         const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
         if (blob.size === 0) return;
-        showDraft(blob);
+        void showDraft(blob);
         void saveDraft(exchangeId, promptKey, blob);
         haptic(10);
       };
@@ -99,59 +151,103 @@ export function VoiceRecorder({
       rec.start(1000);
       setRecording(true);
       setElapsed(0);
+      setLivePeaks([]);
       const startedAt = Date.now();
       timer.current = window.setInterval(() => {
-        const secs = Math.floor((Date.now() - startedAt) / 1000);
+        const secs = (Date.now() - startedAt) / 1000;
         setElapsed(secs);
+        analyser.getByteTimeDomainData(samples);
+        let peak = 0;
+        for (const v of samples) peak = Math.max(peak, Math.abs(v - 128) / 128);
+        setLivePeaks((p) => [...p, Math.min(1, peak * 2.5)].slice(-BARS));
         if (secs >= MAX_ANSWER_SECONDS) stop();
-      }, 250);
+      }, 120);
     } catch {
       setError('Microphone access was blocked. Allow it in your browser settings to record.');
     }
   };
 
-  const discard = () => {
-    showDraft(null);
-    void deleteDraft(exchangeId, promptKey);
+  const togglePlay = () => {
+    const el = audio.current;
+    if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
   };
 
+  const rerecord = async () => {
+    await deleteDraft(exchangeId, promptKey);
+    void showDraft(null);
+    void start();
+  };
+
+  const total = recording ? elapsed : draft?.duration ?? 0;
+  const status = recording ? 'Recording' : draft ? 'Draft ready' : 'No draft yet';
+
   return (
-    <div className={cx('rounded-2xl border bg-panel p-4 shadow-card', draftUrl ? 'border-brass/50' : 'border-line')}>
-      <div className="flex gap-3">
-        <span className={cx('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', draftUrl ? 'bg-brass/20 text-brass' : 'bg-raised text-muted')}>
-          {draftUrl ? <Check size={16} /> : <Mic size={16} />}
-        </span>
-        <p className="font-medium leading-snug">{question}</p>
+    <div className="surface p-4">
+      <div className="flex items-center justify-between">
+        <p className={cx('flex items-center gap-2 text-[13px]', recording ? 'text-accent' : draft ? 'text-brass' : 'text-muted')}>
+          <span className={cx('h-1.5 w-1.5 rounded-full', recording ? 'animate-pulse bg-accent' : draft ? 'bg-brass' : 'bg-muted/50')} />
+          {status}
+        </p>
+        <p className="font-mono text-[11px] tracking-[0.1em] text-ink/85">
+          {formatClock(playing ? position : total)} / {formatClock(MAX_ANSWER_SECONDS)}
+        </p>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {recording ? (
-          <button type="button" onClick={stop} className="tap w-full gap-2 rounded-xl bg-accent px-5 text-sm font-semibold text-canvas" aria-label="Stop recording">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-canvas" aria-hidden="true" />
-            Stop · {elapsed}s / {MAX_ANSWER_SECONDS}s
-          </button>
-        ) : draftUrl ? (
-          <>
-            {/* Local playback of the draft; nothing has been sent. */}
-            <audio src={draftUrl} controls className="h-10 w-full" />
-            <button type="button" onClick={start} disabled={disabled} className="tap flex-1 rounded-xl border border-line bg-raised px-4 text-sm disabled:opacity-40">
-              Record again
-            </button>
-            <button type="button" onClick={discard} disabled={disabled} className="tap rounded-xl px-4 text-sm text-muted hover:text-ink">
-              Discard
-            </button>
-          </>
-        ) : (
-          <button type="button" onClick={start} disabled={disabled} className="tap btn-gold w-full gap-2 rounded-xl px-5 text-sm disabled:opacity-40">
-            <Mic size={18} />
-            Record answer
-          </button>
-        )}
+
+      <div className="mt-3">
+        <Waveform peaks={recording ? livePeaks : draft?.peaks ?? []} progress={playing && draft?.duration ? position / draft.duration : 1} live={recording} />
       </div>
-      <p className="mt-2 text-xs text-muted">
-        {draftUrl ? 'Draft saved on this device only. Re-record as often as you like.' : `Up to ${MAX_ANSWER_SECONDS} seconds.`}
-      </p>
+
+      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+        <button
+          type="button"
+          onClick={togglePlay}
+          disabled={!draft || recording}
+          className="tap gap-2 rounded-xl border border-line bg-raised px-3.5 text-[13px] disabled:opacity-35"
+        >
+          <span aria-hidden="true">{playing ? '❚❚' : '▶'}</span>
+          {playing ? 'Pause' : 'Play Draft'}
+        </button>
+        <button
+          type="button"
+          onClick={recording ? stop : start}
+          disabled={disabled}
+          aria-label={recording ? 'Stop recording' : 'Record answer'}
+          className={cx(
+            'flex h-14 w-14 items-center justify-center rounded-full transition disabled:opacity-35',
+            recording ? 'bg-accent text-canvas' : 'btn-copper',
+          )}
+        >
+          {recording ? <span className="h-4 w-4 rounded-[3px] bg-canvas" /> : <Mic size={22} />}
+        </button>
+        <button
+          type="button"
+          onClick={rerecord}
+          disabled={!draft || recording || disabled}
+          className="tap gap-2 rounded-xl border border-line bg-raised px-3.5 text-[13px] disabled:opacity-35"
+        >
+          <span aria-hidden="true">↻</span>
+          Re-record
+        </button>
+      </div>
+      {draft && (
+        <audio
+          ref={audio}
+          src={draft.url}
+          preload="auto"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false);
+            setPosition(0);
+          }}
+          onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+          className="hidden"
+        />
+      )}
       {error && (
-        <p role="alert" className="mt-1 text-sm text-accent">
+        <p role="alert" className="mt-2 text-sm text-accent">
           {error}
         </p>
       )}

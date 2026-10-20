@@ -126,3 +126,10 @@ export const RAINCHECK_MIN_SHIFT_HOURS = 48;
 export const RAINCHECK_MAX_SHIFT_HOURS = 72;
 export const RAINCHECK_ACCEPT_WINDOW_HOURS = 24;
 export const VENUE_RADIUS_METERS = 3000;
+
+/** "Early 40s" / "Mid 30s" / "Late 50s": a decade band for faceless cards. */
+export function ageBand(age: number): string {
+  const decade = Math.floor(age / 10) * 10;
+  const unit = age % 10;
+  return `${unit <= 3 ? 'Early' : unit <= 6 ? 'Mid' : 'Late'} ${decade}s`;
+}

@@ -2,18 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Semantic colour tokens (RGB triplets). One look: a deep forest-charcoal lounge with
-   antique-gold accents, built for a phone held in one hand. */
+/* Editorial obsidian: Kinfolk pages, Aesop rooms, letterpress stock. Colour tokens are RGB
+   triplets so Tailwind opacity modifiers work. */
 :root {
-  --color-canvas: 13 22 22; /* #0D1616 */
-  --color-panel: 24 37 37; /* #182525 */
-  --color-raised: 32 48 47; /* #20302F */
-  --color-ink: 241 237 228;
-  --color-muted: 154 166 162;
-  --color-line: 50 68 66; /* #324442 */
-  --color-accent: 200 109 81; /* terracotta: errors and warnings only */
-  --color-brass: 216 182 98; /* #D8B662 antique gold */
-  --color-forest: 42 59 60; /* #2A3B3C */
+  --color-canvas: 12 13 16; /* #0C0D10 obsidian charcoal */
+  --color-panel: 19 21 26; /* #13151A elevated surface */
+  --color-raised: 26 28 34; /* #1A1C22 */
+  --color-ink: 244 240 234; /* #F4F0EA warm alabaster */
+  --color-muted: 184 178 166; /* #B8B2A6 warm stone */
+  --color-line: 44 44 48; /* #2C2C30 hairline */
+  --color-accent: 214 120 96; /* errors only */
+  --color-brass: 212 154 88; /* #D49A58 burnished copper */
+  --color-forest: 33 30 27; /* warm shadow tone */
   color-scheme: dark;
 }
 
@@ -24,18 +24,18 @@
     -webkit-tap-highlight-color: transparent;
   }
   body {
-    @apply bg-canvas font-sans text-base text-ink antialiased;
+    @apply bg-canvas font-sans text-[0.9375rem] text-ink antialiased;
     min-height: 100dvh;
-    background-image: radial-gradient(ellipse 120% 60% at 50% -10%, rgb(42 66 64 / 0.75), transparent 70%);
+    background-image: radial-gradient(ellipse 110% 45% at 50% -8%, rgb(212 154 88 / 0.10), transparent 70%);
     background-repeat: no-repeat;
   }
   h1,
   h2,
   h3 {
-    @apply font-sans font-semibold tracking-tight;
+    @apply font-serif font-normal tracking-[-0.01em];
   }
   :focus-visible {
-    @apply outline-none ring-2 ring-brass ring-offset-2 ring-offset-canvas;
+    @apply outline-none ring-2 ring-brass/70 ring-offset-2 ring-offset-canvas;
   }
   ::selection {
     @apply bg-brass/30;
@@ -47,12 +47,30 @@
   .tap {
     @apply inline-flex min-h-touch min-w-touch items-center justify-center;
   }
-  .eyebrow {
-    @apply text-sm text-muted;
+  /* Micro-index: mono, uppercase, wide tracking. */
+  .label-mono {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-brass;
   }
-  /* The gold call to action from the design. */
+  .eyebrow {
+    @apply font-mono text-[11px] uppercase tracking-[0.18em] text-muted;
+  }
+  /* Section heading with a hairline running to the edge. */
+  .label-rule {
+    @apply flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted after:h-px after:flex-1 after:bg-line;
+  }
+  /* Elevated editorial surface with a warm top-edge highlight. */
+  .surface {
+    @apply rounded-[18px] border border-line bg-panel shadow-card;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-brass/45 px-3 py-1 font-mono text-[11px] tracking-[0.06em] text-brass;
+  }
+  /* Burnished copper call to action. */
+  .btn-copper {
+    @apply bg-gradient-to-r from-[#E6B47C] via-[#D9A266] to-[#C4874A] font-semibold text-[#1A130B] shadow-glow;
+  }
   .btn-gold {
-    @apply bg-gradient-to-b from-[#E9CD82] to-[#C49A42] font-semibold text-[#1B1A12] shadow-[0_6px_20px_-8px_rgb(216_182_98/0.6)];
+    @apply btn-copper;
   }
   .no-callout {
     -webkit-touch-callout: none;

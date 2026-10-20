@@ -4,7 +4,7 @@ A zero-burnout, non-rotating, character-first relationship platform for adults a
 
 1. **Invisible structural filtering.** Age bounds, mutual orientation, radius and life-architecture gates are applied silently before the deal. Members never see gate badges.
 2. **Monday: blind whole-card selection.** Six faceless, nameless cards (Life Rhythm, behavioral interests, the Flaw + Upside coin). Up to three whole profiles go into simultaneous blind escrow, plus one optional Freeze Token.
-3. **Mid-week: asynchronous voice Q&A.** Mutual selections unlock a voice exchange. Each sends two questions, written themselves or picked from a 90-question bank in three vectors (daily rhythm, after Murstein's SVR model; inner world, after the Pratfall Effect; joy & curiosity, after Aron's closeness paradigm); a 36-hour Response Clock governs the answers. Drafts stay on the device, and both vaults stay double-blind until both lock.
+3. **Mid-week: asynchronous voice Q&A.** Mutual selections unlock a voice exchange. Each sends three questions, written themselves or picked from a 90-question bank in three vectors (daily rhythm, after Murstein's SVR model; inner world, after the Pratfall Effect; joy & curiosity, after Aron's closeness paradigm); a 36-hour Response Clock governs the answers. Drafts stay on the device, and both vaults stay double-blind until both lock.
 4. **The modality switch.** The instant both lock, first names and photos unblur together, both voice notes become playable, and the First-Meet Bridge opens: a 45-minute coffee or wine audit at a curated venue near the midpoint, within 72 hours.
 
 There are no swipes, feeds or "likes you" queues, and no generative AI anywhere in the discovery path.

@@ -1,6 +1,7 @@
 'use client';
 
 import type { MatchDetail } from '@thirtydates/shared';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { BridgePanel } from '@/components/BridgePanel';
@@ -32,25 +33,28 @@ export default function MatchPage() {
 
   return (
     <div className="space-y-5">
-      <header className="text-center">
-        <h1 className="text-[1.75rem] leading-tight">{match.status === 'bridging' ? 'It’s a Match!' : match.counterpart.first_name}</h1>
-        <p className="text-lg font-semibold text-brass">
+      <Link href="/matches" className="tap -ml-2 gap-1.5 px-2 text-[13.5px] text-ink/85 hover:text-ink">
+        ‹ Matches
+      </Link>
+      <header>
+        <h1 className="text-[2.5rem] leading-none">
+          {match.counterpart.first_name}, {match.counterpart.age}
+        </h1>
+        <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.16em] text-brass">
           {match.status === 'bridging' ? 'Your photos are unblurred' : match.status === 'scheduled' ? 'You’re meeting' : 'Your match'}
         </p>
       </header>
 
-      <div className="relative mx-auto aspect-[4/5] w-full max-w-[18rem] overflow-hidden rounded-2xl border border-line bg-raised shadow-card">
+      <div className="relative -mx-5 h-72 overflow-hidden">
         {photo ? (
           // Plain img: the authenticated, private photo endpoint.
           <img src={`/api/photos/${photo}`} alt={`Photo of ${match.counterpart.first_name}`} className="h-full w-full object-cover" />
         ) : (
-          <span className="flex h-full w-full items-center justify-center text-6xl font-semibold text-brass/70" aria-hidden="true">
+          <span className="flex h-full w-full items-center justify-center bg-gradient-to-b from-[#2A2622] to-canvas font-serif text-[6rem] text-brass/60" aria-hidden="true">
             {match.counterpart.first_name.slice(0, 1)}
           </span>
         )}
-        <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-12 text-lg font-semibold">
-          {match.counterpart.first_name}, {match.counterpart.age}
-        </span>
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-canvas to-transparent" />
       </div>
 
       {closed && <Notice>This match has closed. No one was told why — and nothing was your fault.</Notice>}

@@ -28,10 +28,12 @@ module.exports = {
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         brass: 'rgb(var(--color-brass) / <alpha-value>)',
         pine: 'rgb(var(--color-forest) / <alpha-value>)',
+        copper: 'rgb(var(--color-brass) / <alpha-value>)',
       },
       fontFamily: {
-        serif: ['var(--font-serif)', 'Cormorant Garamond', 'Playfair Display', 'Georgia', 'serif'],
+        serif: ['var(--font-serif)', 'Instrument Serif', 'Cormorant Garamond', 'Georgia', 'serif'],
         sans: ['var(--font-sans)', 'Inter', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       fontSize: {
         // Generous line heights throughout.
@@ -61,7 +63,8 @@ module.exports = {
         sheet: '1.75rem',
       },
       boxShadow: {
-        card: '0 1px 0 rgb(255 255 255 / 0.04) inset, 0 14px 30px -18px rgb(0 0 0 / 0.7)',
+        card: '0 1px 0 rgb(255 236 210 / 0.06) inset, 0 18px 40px -24px rgb(0 0 0 / 0.8)',
+        glow: '0 10px 30px -10px rgb(212 154 88 / 0.55)',
         sheet: '0 -24px 60px -20px rgb(0 0 0 / 0.6)',
       },
       transitionTimingFunction: {

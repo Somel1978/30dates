@@ -1,14 +1,21 @@
 import type { Metadata, Viewport } from 'next';
-import { Cormorant_Garamond, Inter } from 'next/font/google';
+import { Inter, Instrument_Serif, JetBrains_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/AppShell';
 import './globals.css';
 
-const serif = Cormorant_Garamond({
+const serif = Instrument_Serif({
   subsets: ['latin'],
-  weight: ['400', '500', '600'],
+  weight: '400',
   style: ['normal', 'italic'],
   variable: '--font-serif',
+  display: 'swap',
+});
+
+const mono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
   display: 'swap',
 });
 
@@ -35,12 +42,12 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#0D1616',
+  themeColor: '#0C0D10',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`dark ${serif.variable} ${sans.variable}`}>
+    <html lang="en" className={`dark ${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body>
         <AppShell>{children}</AppShell>
       </body>

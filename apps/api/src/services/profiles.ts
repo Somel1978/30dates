@@ -1,4 +1,4 @@
-import { interestLabel, lifeRhythm, type CardProfile } from '@thirtydates/shared';
+import { ageBand, interestLabel, lifeRhythm, type CardProfile } from '@thirtydates/shared';
 import type { Tx } from '../db/pool.js';
 
 /**
@@ -10,12 +10,13 @@ export async function loadCardProfiles(tx: Tx, viewerId: string, userIds: readon
   if (userIds.length === 0) return new Map();
   const { rows } = await tx.query<{
     id: string;
+    age: number;
     distance_km: number;
     flaw: string;
     upside: string;
     interests: { position: number; key: string; receipt: string }[];
   }>(
-    `SELECT u.id,
+    `SELECT u.id, date_part('year', age(u.birth_date))::int AS age,
             greatest(1, ceil(ST_Distance(u.coordinates::geography, me.coordinates::geography) / 1000.0))::int AS distance_km,
             c.flaw, c.upside,
             coalesce((SELECT json_agg(json_build_object('position', bi.position, 'key', bi.interest_key, 'receipt', bi.receipt)
@@ -33,6 +34,7 @@ export async function loadCardProfiles(tx: Tx, viewerId: string, userIds: readon
         r.id,
         {
           user_id: r.id,
+          age_band: ageBand(r.age),
           distance_km: r.distance_km,
           rhythm: lifeRhythm(r.interests.map((i) => i.key)),
           interests: r.interests.map((i) => ({ ...i, label: interestLabel(i.key) })),

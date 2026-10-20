@@ -163,8 +163,12 @@ export async function getMatch(ctx: AppContext, userId: string, matchId: string)
     const venue = match.venue_id
       ? (
           await tx.query<VenueDto>(
-            `SELECT id, name, address, venue_type, ST_Y(geom) AS lat, ST_X(geom) AS lng FROM partner_venues WHERE id = $1`,
-            [match.venue_id],
+            `SELECT v.id, v.name, v.address, v.venue_type, ST_Y(v.geom) AS lat, ST_X(v.geom) AS lng,
+                    round((ST_Distance(v.geom::geography,
+                       ST_Centroid(ST_Collect(a.coordinates, b.coordinates))::geography) / 1000.0)::numeric, 1)::float AS midpoint_km
+               FROM partner_venues v, users a, users b
+              WHERE v.id = $1 AND a.id = $2 AND b.id = $3`,
+            [match.venue_id, match.user_a_id, match.user_b_id],
           )
         ).rows[0] ?? null
       : null;

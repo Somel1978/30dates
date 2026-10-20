@@ -239,13 +239,13 @@ describe('voice exchange over HTTP', () => {
     await runExchangeTick(ctx);
     const exchangeId = (await app.inject({ method: 'GET', url: '/api/batches/current', headers: { cookie: cookieA } })).json()
       .exchanges[0].id as string;
-    await pickPrompts(ctx, b, exchangeId, VOICE_PROMPTS.slice(0, 2).map((p) => p.key));
+    await pickPrompts(ctx, b, exchangeId, VOICE_PROMPTS.slice(0, 3).map((p) => p.key));
     ctx.setNow(at(3, 1));
     await runExchangeTick(ctx);
 
     const boundary = '----voice';
     const body = Buffer.concat([
-      ...VOICE_PROMPTS.slice(0, 2).flatMap((p) => [
+      ...VOICE_PROMPTS.slice(0, 3).flatMap((p) => [
         Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${p.key}"; filename="${p.key}.wav"\r\nContent-Type: audio/wav\r\n\r\n`),
         toneWav(),
         Buffer.from('\r\n'),
@@ -261,7 +261,7 @@ describe('voice exchange over HTTP', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().released).toBe(false);
     expect(res.json().exchange.i_locked).toBe(true);
-    expect(res.json().exchange.my_answers).toHaveLength(2);
+    expect(res.json().exchange.my_answers).toHaveLength(3);
   });
 });
 
