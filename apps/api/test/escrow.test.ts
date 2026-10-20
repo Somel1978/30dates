@@ -10,7 +10,8 @@ import { getMatch } from '../src/services/matches.js';
 import { TEST_WEEK, at, createMember, dealBatch, dealPair, makeCtx, resetDb } from './helpers.js';
 
 const ctx = makeCtx();
-const [P1, P2, P3] = VOICE_PROMPTS.map((p) => p.key) as [string, string, string];
+const [P1, P2] = VOICE_PROMPTS.map((p) => p.key) as [string, string];
+const OWN = 'What did your grandmother teach you about Sundays?';
 
 async function rawStakesVisibleTo(userId: string) {
   return withUserTx(ctx.db, userId, async (tx) => (await tx.query('SELECT * FROM escrow_vault')).rows);
@@ -168,29 +169,38 @@ describe('Stage 3: asynchronous voice Q&A', () => {
   it('runs questions → 36 h Response Clock → double-blind lock → simultaneous release', async () => {
     const { a, b, exchangeId } = await mutualPair();
 
-    // Wednesday: each drops 2–3 questions for the other.
+    // Wednesday: each sends two questions, from the bank or written themselves.
     const bank = await getExchange(ctx, a, exchangeId);
     expect(bank.status).toBe('questions');
     expect(bank.prompt_bank.length).toBeGreaterThan(3);
     expect(bank.questions_for_me).toEqual([]);
     await pickPrompts(ctx, a, exchangeId, [P1, P2]);
-    await pickPrompts(ctx, b, exchangeId, [P1, P2, P3]);
+    await pickPrompts(ctx, b, exchangeId, [P1, { text: `  ${OWN} ` }]);
     expect(await errorCode(pickPrompts(ctx, a, exchangeId, [P1]))).toBe('invalid_picks');
+    expect(await errorCode(pickPrompts(ctx, a, exchangeId, [P1, P2, VOICE_PROMPTS[2]!.key]))).toBe('invalid_picks');
+    expect(await errorCode(pickPrompts(ctx, a, exchangeId, [P1, { text: 'Why?' }]))).toBe('invalid_picks');
+    expect((await getExchange(ctx, b, exchangeId)).my_picks).toEqual([
+      { key: P1, text: VOICE_PROMPTS[0]!.text, custom: false },
+      { key: 'custom_2', text: OWN, custom: true },
+    ]);
 
     // Thursday 00:00: the Response Clock starts; each now sees the questions they must answer.
     ctx.setNow(at(3, 0, 1));
     expect((await runExchangeTick(ctx)).started).toBe(1);
     const forA = await getExchange(ctx, a, exchangeId);
     expect(forA.status).toBe('answering');
-    expect(forA.questions_for_me.map((q) => q.key)).toEqual([P1, P2, P3]);
+    expect(forA.questions_for_me).toEqual([
+      { key: P1, text: VOICE_PROMPTS[0]!.text },
+      { key: 'custom_2', text: OWN },
+    ]);
     expect(Date.parse(forA.answers_close_at) - Date.parse(forA.questions_close_at)).toBe(36 * 3_600_000);
 
     // Must answer every question; locking is final.
     expect(await errorCode(lockAnswers(ctx, a, exchangeId, [{ promptKey: P1, data: toneWav() }]))).toBe('answers_incomplete');
     expect(
-      await errorCode(lockAnswers(ctx, a, exchangeId, [P1, P2, P3].map((k) => ({ promptKey: k, data: Buffer.from('not audio') })))),
+      await errorCode(lockAnswers(ctx, a, exchangeId, [P1, 'custom_2'].map((k) => ({ promptKey: k, data: Buffer.from('not audio') })))),
     ).toBe('invalid_audio');
-    expect(await lockAnswers(ctx, a, exchangeId, [P1, P2, P3].map((k) => ({ promptKey: k, data: toneWav() })))).toEqual({
+    expect(await lockAnswers(ctx, a, exchangeId, [P1, 'custom_2'].map((k) => ({ promptKey: k, data: toneWav() })))).toEqual({
       released: false,
     });
     expect(await errorCode(lockAnswers(ctx, a, exchangeId, []))).toBe('already_locked');

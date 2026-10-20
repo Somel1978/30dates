@@ -1,24 +1,29 @@
 'use client';
 
 import {
+  CUSTOM_QUESTION_MAX,
+  CUSTOM_QUESTION_MIN,
   MAX_PROMPTS_PER_PICK,
-  MIN_PROMPTS_PER_PICK,
   PROMPT_VECTORS,
   PROMPT_VECTOR_LABELS,
   type ExchangeDetail,
+  type MatchDetail,
   type PromptVector,
 } from '@thirtydates/shared';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BridgePanel } from '@/components/BridgePanel';
 import { Countdown } from '@/components/Countdown';
-import { Lock } from '@/components/icons';
+import { EventPanel } from '@/components/EventPanel';
+import { Lock, Spark } from '@/components/icons';
 import { BlurredAvatar, CardBody } from '@/components/MondayCard';
 import { VoiceRecorder, recordingAvailable } from '@/components/VoiceRecorder';
 import { BottomSheet, Button, Notice, OptionRow, Panel, ScreenHeader, Spinner, StickyActions, cx } from '@/components/primitives';
 import { ApiError, api, useResource } from '@/lib/api';
 import { deleteDraft } from '@/lib/drafts';
 import { haptic } from '@/lib/format';
+import { useRevealed } from '@/lib/reveal';
 import { useMemberSession } from '@/lib/session';
 
 const EXTENSION: Record<string, string> = { 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/wav': 'wav' };
@@ -67,23 +72,39 @@ function UnlockPair({ caption }: { caption: string }) {
   );
 }
 
+type Pick = { key: string | null; text: string; custom: boolean };
+
+const pickId = (p: Pick) => (p.custom ? `text:${p.text}` : `key:${p.key}`);
+
 function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSaved: (x: ExchangeDetail) => void }) {
-  const [picked, setPicked] = useState<string[]>(exchange.my_picks);
+  const initial = useMemo<Pick[]>(() => exchange.my_picks.map((p) => ({ key: p.custom ? null : p.key, text: p.text, custom: p.custom })), [exchange.my_picks]);
+  const [picked, setPicked] = useState<Pick[]>(initial);
   const [tab, setTab] = useState<PromptVector>('rhythm');
+  const [writing, setWriting] = useState(false);
+  const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'muted' | 'error'; text: string }>();
-  const dirty = picked.join() !== exchange.my_picks.join();
-  const valid = picked.length >= MIN_PROMPTS_PER_PICK && picked.length <= MAX_PROMPTS_PER_PICK;
-  const byKey = useMemo(() => new Map(exchange.prompt_bank.map((p) => [p.key, p])), [exchange.prompt_bank]);
+  const dirty = picked.map(pickId).join('|') !== initial.map(pickId).join('|');
+  const full = picked.length >= MAX_PROMPTS_PER_PICK;
+  const valid = picked.length === MAX_PROMPTS_PER_PICK;
 
-  const toggle = (key: string) =>
-    setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : p.length < MAX_PROMPTS_PER_PICK ? [...p, key] : p));
+  const toggle = (p: Pick) =>
+    setPicked((list) => (list.some((x) => pickId(x) === pickId(p)) ? list.filter((x) => pickId(x) !== pickId(p)) : list.length < MAX_PROMPTS_PER_PICK ? [...list, p] : list));
+
+  const addOwn = () => {
+    const text = draft.trim().replace(/\s+/g, ' ');
+    if (text.length < CUSTOM_QUESTION_MIN) return;
+    toggle({ key: null, text, custom: true });
+    setDraft('');
+    setWriting(false);
+  };
 
   const save = async () => {
     setBusy(true);
     setMessage(undefined);
     try {
-      onSaved(await api<ExchangeDetail>(`/exchanges/${exchange.id}/questions`, { method: 'PUT', body: { prompt_keys: picked } }));
+      const questions = picked.map((p) => (p.custom ? { text: p.text } : { key: p.key! }));
+      onSaved(await api<ExchangeDetail>(`/exchanges/${exchange.id}/questions`, { method: 'PUT', body: { questions } }));
       haptic(10);
       setMessage({ tone: 'muted', text: 'Locked in. They’ll see your questions on Thursday.' });
     } catch (err) {
@@ -99,7 +120,7 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
         <ProgressRing value={picked.length} max={MAX_PROMPTS_PER_PICK} />
         <h1 className="mt-3 text-[1.75rem] leading-tight">Mid-Week Drop</h1>
         <p className="mt-1 text-sm text-muted">
-          {picked.length < MAX_PROMPTS_PER_PICK ? `${MAX_PROMPTS_PER_PICK} questions to unlock` : 'Ready to lock'} · changes close in{' '}
+          {full ? 'Ready to lock' : `${MAX_PROMPTS_PER_PICK} questions to unlock`} · changes close in{' '}
           <Countdown to={exchange.questions_close_at} serverNow={exchange.server_now} className="text-ink" />
         </p>
       </div>
@@ -107,43 +128,43 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
 
       {picked.length > 0 && (
         <div className="mb-4 space-y-2">
-          <p className="text-sm font-medium">Your picks</p>
-          {picked.map((k) => (
-            <OptionRow key={k} title={byKey.get(k)?.text ?? k} selected onClick={() => toggle(k)} />
+          <p className="text-sm font-medium">Your two questions</p>
+          {picked.map((p) => (
+            <OptionRow key={pickId(p)} title={<span className="text-[0.9375rem] font-normal">{p.text}</span>} subtitle={p.custom ? 'Written by you · tap to remove' : 'Tap to remove'} selected onClick={() => toggle(p)} />
           ))}
         </div>
       )}
 
-      <p className="mb-2 text-sm font-medium">Choose</p>
-      <div role="tablist" className="mb-3 grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
-        {PROMPT_VECTORS.map((v) => (
-          <button
-            key={v}
-            type="button"
-            role="tab"
-            aria-selected={tab === v}
-            onClick={() => setTab(v)}
-            className={cx('min-h-[2.5rem] rounded-lg text-[0.8125rem] font-medium transition-colors', tab === v ? 'bg-raised text-brass' : 'text-muted')}
-          >
-            {PROMPT_VECTOR_LABELS[v].title}
-          </button>
-        ))}
-      </div>
-      <p className="mb-3 text-xs text-muted">{PROMPT_VECTOR_LABELS[tab].subtitle}</p>
-      <ul role="list" className="space-y-2.5">
-        {exchange.prompt_bank
-          .filter((p) => p.vector === tab && !picked.includes(p.key))
-          .map((p) => (
-            <li key={p.key}>
-              <OptionRow
-                icon={<Lock size={16} />}
-                title={<span className="text-[0.9375rem] font-normal">{p.text}</span>}
-                onClick={() => toggle(p.key)}
-                disabled={picked.length >= MAX_PROMPTS_PER_PICK}
-              />
-            </li>
-          ))}
-      </ul>
+      {!full && (
+        <>
+          <OptionRow icon={<Spark size={18} />} title="Write your own question" subtitle="Ask exactly what you want to hear them answer" onClick={() => setWriting(true)} trailing={<span className="text-xl text-brass">+</span>} />
+          <p className="mb-2 mt-5 text-sm font-medium">Or choose</p>
+          <div role="tablist" className="mb-3 grid grid-cols-3 gap-1 rounded-xl border border-line bg-panel p-1">
+            {PROMPT_VECTORS.map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={tab === v}
+                onClick={() => setTab(v)}
+                className={cx('min-h-[2.5rem] rounded-lg text-[0.8125rem] font-medium transition-colors', tab === v ? 'bg-raised text-brass' : 'text-muted')}
+              >
+                {PROMPT_VECTOR_LABELS[v].title}
+              </button>
+            ))}
+          </div>
+          <p className="mb-3 text-xs text-muted">{PROMPT_VECTOR_LABELS[tab].subtitle}</p>
+          <ul role="list" className="space-y-2.5">
+            {exchange.prompt_bank
+              .filter((p) => p.vector === tab && !picked.some((x) => x.key === p.key))
+              .map((p) => (
+                <li key={p.key}>
+                  <OptionRow icon={<Lock size={16} />} title={<span className="text-[0.9375rem] font-normal">{p.text}</span>} onClick={() => toggle({ key: p.key, text: p.text, custom: false })} />
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
 
       <StickyActions aboveTabs>
         <Button className="w-full" onClick={save} busy={busy} disabled={!valid || !dirty}>
@@ -155,6 +176,27 @@ function QuestionPicker({ exchange, onSaved }: { exchange: ExchangeDetail; onSav
           </div>
         )}
       </StickyActions>
+
+      <BottomSheet open={writing} title="Your own question" onClose={() => setWriting(false)}>
+        <label htmlFor="own-question" className="sr-only">
+          Your question
+        </label>
+        <textarea
+          id="own-question"
+          rows={3}
+          maxLength={CUSTOM_QUESTION_MAX}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="What’s a small ritual you’d never give up?"
+          className="w-full resize-none rounded-xl border border-line bg-raised px-4 py-3 text-base outline-none focus:border-brass"
+        />
+        <p className="mt-1 text-right text-xs text-muted">
+          {draft.trim().length}/{CUSTOM_QUESTION_MAX}
+        </p>
+        <Button className="mt-3 w-full" onClick={addOwn} disabled={draft.trim().length < CUSTOM_QUESTION_MIN}>
+          Add question
+        </Button>
+      </BottomSheet>
     </div>
   );
 }
@@ -184,6 +226,7 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
       await Promise.all(exchange.questions_for_me.map((q) => deleteDraft(exchange.id, q.key)));
       haptic([8, 40, 14]);
       onLocked(res.exchange);
+      window.scrollTo({ top: 0 });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Not sent. Your drafts are still here.');
     } finally {
@@ -239,7 +282,7 @@ function AnswerBooth({ exchange, onLocked }: { exchange: ExchangeDetail; onLocke
   );
 }
 
-function AnswerList({ title, answers }: { title: string; answers: ExchangeDetail['their_answers'] }) {
+function AnswerList({ title, answers, onPlay }: { title: string; answers: ExchangeDetail['their_answers']; onPlay?: () => void }) {
   return (
     <section className="mt-6">
       <h2 className="mb-2 text-base">{title}</h2>
@@ -247,11 +290,87 @@ function AnswerList({ title, answers }: { title: string; answers: ExchangeDetail
         {answers.map((a) => (
           <li key={a.prompt_key} className="rounded-2xl border border-line bg-panel p-4">
             <p className="text-[0.9375rem] font-medium leading-snug">{a.text}</p>
-            <audio src={a.audio_url} controls preload="none" className="mt-3 h-10 w-full" />
+            <audio src={a.audio_url} controls preload="none" onPlay={onPlay} className="mt-3 h-10 w-full" />
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * The Simultaneous Reveal. The vault opened the instant you both locked; their name and face
+ * appear right here on the player the moment you press Play on their voice, and the First-Meet
+ * Bridge sits directly underneath.
+ */
+function RevealScreen({ exchange }: { exchange: ExchangeDetail }) {
+  const revealed = exchange.revealed!;
+  const photo = revealed.photo_ids[0];
+  const [shown, reveal] = useRevealed(exchange.id);
+  const matchResource = useResource<MatchDetail>(exchange.match_id ? `/matches/${exchange.match_id}` : null, 60_000);
+  const [match, setMatch] = useState<MatchDetail>();
+  useEffect(() => {
+    if (matchResource.data) setMatch(matchResource.data);
+  }, [matchResource.data]);
+
+  return (
+    <div>
+      <div className="text-center">
+        <h1 className="text-[1.75rem] leading-tight">{shown ? 'It’s a Match!' : 'The vault is open'}</h1>
+        <p className="text-lg font-semibold text-brass">{shown ? `Meet ${revealed.first_name}` : 'You both answered. Press play.'}</p>
+      </div>
+
+      <section className="mt-4 overflow-hidden rounded-2xl border border-line bg-panel shadow-card" aria-label="Their voice notes">
+        <div className="relative aspect-[4/3] w-full overflow-hidden bg-raised">
+          {photo ? (
+            // Plain img: the authenticated, private photo endpoint.
+            <img
+              src={`/api/photos/${photo}`}
+              alt={shown ? `Photo of ${revealed.first_name}` : ''}
+              className={cx('h-full w-full object-cover transition-[filter,transform] duration-[1400ms] ease-calm', shown ? 'blur-0' : 'scale-110 blur-2xl')}
+            />
+          ) : (
+            <span className={cx('flex h-full w-full items-center justify-center text-7xl font-semibold text-brass/70 transition-[filter] duration-[1400ms]', !shown && 'blur-xl')}>
+              {revealed.first_name.slice(0, 1)}
+            </span>
+          )}
+          {!shown && (
+            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-canvas/70 text-3xl font-semibold text-brass">?</span>
+              <span className="rounded-full bg-canvas/70 px-3 py-1 text-sm">Play their voice to see them</span>
+            </span>
+          )}
+          <span
+            className={cx(
+              'absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-12 text-xl font-semibold transition-opacity duration-700',
+              shown ? 'opacity-100' : 'opacity-0',
+            )}
+          >
+            {revealed.first_name}, {revealed.age}
+          </span>
+        </div>
+        <ul role="list" className="divide-y divide-line">
+          {exchange.their_answers.map((a) => (
+            <li key={a.prompt_key} className="p-4">
+              <p className="text-[0.9375rem] font-medium leading-snug">{a.text}</p>
+              <audio src={a.audio_url} controls preload="none" onPlay={reveal} className="mt-3 h-10 w-full" />
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {shown && match && (
+        <div className="mt-5 space-y-3">
+          {match.status === 'bridging' && <BridgePanel match={match} onUpdated={setMatch} />}
+          {match.event && match.event.status !== 'cancelled' && <EventPanel match={match} onUpdated={setMatch} />}
+          <Link href={`/matches/${match.id}`} className="tap w-full rounded-xl border border-line bg-raised text-sm">
+            Messages and details
+          </Link>
+        </div>
+      )}
+
+      <AnswerList title="Your answers" answers={exchange.my_answers} />
+    </div>
   );
 }
 
@@ -268,8 +387,6 @@ export default function ExchangePage() {
   }, [resource.data]);
 
   if (!exchange) return resource.error ? <Notice tone="error">{resource.error.message}</Notice> : <Spinner />;
-  const revealed = exchange.revealed;
-  const photo = revealed?.photo_ids[0];
 
   return (
     <div>
@@ -292,32 +409,7 @@ export default function ExchangePage() {
         </>
       )}
 
-      {exchange.status === 'released' && revealed && (
-        <>
-          <div className="text-center">
-            <h1 className="text-[1.75rem] leading-tight">It’s a Match!</h1>
-            <p className="text-lg font-semibold text-brass">Your photos are unblurred</p>
-          </div>
-          <div className="relative mx-auto mt-4 aspect-[4/5] w-full max-w-[18rem] overflow-hidden rounded-2xl border border-line bg-raised shadow-card">
-            {photo ? (
-              // Plain img: the authenticated, private photo endpoint.
-              <img src={`/api/photos/${photo}`} alt={`Photo of ${revealed.first_name}`} className="h-full w-full animate-fade-in object-cover" />
-            ) : (
-              <span className="flex h-full w-full items-center justify-center text-6xl font-semibold text-brass/70">{revealed.first_name.slice(0, 1)}</span>
-            )}
-            <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-10 text-lg font-semibold">
-              {revealed.first_name}, {revealed.age}
-            </span>
-          </div>
-          {exchange.match_id && (
-            <Link href={`/matches/${exchange.match_id}`} className="tap btn-gold mt-5 w-full rounded-xl text-[0.9375rem]">
-              Propose a meet-up
-            </Link>
-          )}
-          <AnswerList title={`${revealed.first_name}’s answers`} answers={exchange.their_answers} />
-          <AnswerList title="Your answers" answers={exchange.my_answers} />
-        </>
-      )}
+      {exchange.status === 'released' && exchange.revealed && <RevealScreen exchange={exchange} />}
 
       {exchange.status === 'expired' && (
         <ScreenHeader title="This one has closed" subtitle="Time ran out before you both answered. Nothing was shared, and the recordings were deleted." />

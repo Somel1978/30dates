@@ -11,6 +11,7 @@ import { BottomSheet, Button, Notice, Panel, ScreenHeader, Spinner } from '@/com
 import { ApiError, api, useResource } from '@/lib/api';
 import { useDevToolsAvailable } from '@/lib/devTools';
 import { formatDateTime, haptic } from '@/lib/format';
+import { useRevealed } from '@/lib/reveal';
 import { useMemberSession } from '@/lib/session';
 
 const HOLD_MS = 350;
@@ -26,19 +27,22 @@ const MATCH_STATUS: Record<MatchSummary['status'], string> = {
 const EXCHANGE_STATUS: Record<ExchangeSummary['status'], string> = {
   questions: 'Choose your questions',
   answering: 'Answer in your voice',
-  released: 'It’s a match',
+  released: 'You both answered',
   expired: 'Closed quietly',
 };
 
 function ExchangeRow({ x, serverNow }: { x: ExchangeSummary; serverNow: string }) {
-  const photo = x.revealed?.photo_ids[0];
+  // Name and face stay hidden here until they've pressed Play on the reveal screen.
+  const [played] = useRevealed(x.id);
+  const revealed = played ? x.revealed : null;
+  const photo = revealed?.photo_ids[0];
   let detail: React.ReactNode;
   if (x.status === 'questions') detail = x.my_pick_count ? `${x.my_pick_count} questions chosen` : 'Pick 2–3 questions for them';
   else if (x.status === 'answering')
     detail = x.i_locked ? 'Sent · waiting for theirs' : <><Countdown to={x.answers_close_at} serverNow={serverNow} /> left to answer</>;
-  else if (x.status === 'released') detail = 'Your photos are unblurred';
+  else if (x.status === 'released') detail = revealed ? 'Propose a 45-min coffee window' : 'The vault is open · press play';
   else detail = 'Time ran out; nothing was shared';
-  const href = x.status === 'released' && x.match_id ? `/matches/${x.match_id}` : `/exchanges/${x.id}`;
+  const href = `/exchanges/${x.id}`;
 
   return (
     <li>
@@ -49,13 +53,13 @@ function ExchangeRow({ x, serverNow }: { x: ExchangeSummary; serverNow: string }
           x.status === 'expired' ? 'pointer-events-none border-line opacity-50' : x.status === 'released' ? 'border-brass/70' : 'border-line'
         }`}
       >
-        {x.revealed ? (
+        {revealed ? (
           photo ? (
             // Plain img: the authenticated, private photo endpoint.
             <img src={`/api/photos/${photo}`} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-brass/60" />
           ) : (
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pine text-lg font-semibold ring-2 ring-brass/60">
-              {x.revealed.first_name.slice(0, 1)}
+              {revealed.first_name.slice(0, 1)}
             </span>
           )
         ) : (
@@ -64,7 +68,7 @@ function ExchangeRow({ x, serverNow }: { x: ExchangeSummary; serverNow: string }
         <span className="min-w-0 flex-1">
           <span className="block text-xs font-medium text-brass">{EXCHANGE_STATUS[x.status]}</span>
           <span className="block truncate font-medium">
-            {x.revealed ? `${x.revealed.first_name}, ${x.revealed.age}` : x.counterpart.interests.map((i) => i.label).join(' · ')}
+            {revealed ? `${revealed.first_name}, ${revealed.age}` : x.counterpart.interests.map((i) => i.label).join(' · ')}
           </span>
           <span className="block text-[0.8125rem] text-muted">{detail}</span>
         </span>
@@ -181,7 +185,8 @@ export default function MondayBatchPage() {
   if (!data) return <Notice tone="error">{batch.error?.message ?? session.error?.message ?? 'Could not load your week.'}</Notice>;
 
   const frozenCard = data.cards.find((c) => c.frozen);
-  const liveMatches = (matches.data ?? []).filter((m) => m.status !== 'expired');
+  // This week's matches live on their exchange row (the reveal screen), so nothing is spoiled here.
+  const liveMatches = (matches.data ?? []).filter((m) => m.status !== 'expired' && !data.exchanges.some((x) => x.match_id === m.id));
   const midWeek = data.phase === 'exchange_questions' || data.phase === 'exchange_answers';
   const left = data.selections_remaining;
 

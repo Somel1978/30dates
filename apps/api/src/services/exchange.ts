@@ -3,6 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   MAX_ANSWER_BYTES,
+  CUSTOM_QUESTION_MAX,
+  CUSTOM_QUESTION_MIN,
   MAX_PROMPTS_PER_PICK,
   MIN_PROMPTS_PER_PICK,
   VOICE_PROMPTS,
@@ -87,12 +89,22 @@ async function loadForParty(tx: Tx, exchangeId: string, userId: string, lock = f
 const counterpartOf = (x: ExchangeRow, userId: string) => (x.user_a_id === userId ? x.user_b_id : x.user_a_id);
 const lockedAt = (x: ExchangeRow, userId: string) => (x.user_a_id === userId ? x.user_a_locked_at : x.user_b_locked_at);
 
-async function picksBy(tx: Tx, exchangeId: string, pickerId: string): Promise<string[]> {
-  const { rows } = await tx.query<{ prompt_key: string }>(
-    'SELECT prompt_key FROM voice_prompt_picks WHERE exchange_id = $1 AND picker_id = $2 ORDER BY position',
+interface Pick {
+  key: string;
+  text: string;
+  custom: boolean;
+}
+
+async function picksBy(tx: Tx, exchangeId: string, pickerId: string): Promise<Pick[]> {
+  const { rows } = await tx.query<{ prompt_key: string; custom_text: string | null }>(
+    'SELECT prompt_key, custom_text FROM voice_prompt_picks WHERE exchange_id = $1 AND picker_id = $2 ORDER BY position',
     [exchangeId, pickerId],
   );
-  return rows.map((r) => r.prompt_key);
+  return rows.map((r) => ({
+    key: r.prompt_key,
+    text: r.custom_text ?? VOICE_PROMPT_BY_KEY.get(r.prompt_key)?.text ?? r.prompt_key,
+    custom: r.custom_text !== null,
+  }));
 }
 
 async function matchIdFor(tx: Tx, x: ExchangeRow): Promise<string | null> {
@@ -153,33 +165,54 @@ export async function getExchange(ctx: AppContext, userId: string, exchangeId: s
       'SELECT answerer_id, prompt_key FROM voice_answers WHERE exchange_id = $1',
       [x.id],
     );
-    const text = (key: string) => VOICE_PROMPT_BY_KEY.get(key)?.text ?? key;
+    // An answer's question was picked by the other person; custom keys are per picker.
+    const asked = new Map<string, Map<string, string>>([
+      [userId, new Map((await picksBy(tx, x.id, other)).map((q) => [q.key, q.text]))],
+      [other, new Map(myPicks.map((q) => [q.key, q.text]))],
+    ]);
+    const answerText = (answerer: string, key: string) => asked.get(answerer)?.get(key) ?? VOICE_PROMPT_BY_KEY.get(key)?.text ?? key;
     return {
       ...summary!,
       server_now: ctx.now().toISOString(),
       prompt_bank: x.status === 'questions' ? VOICE_PROMPTS.map((p) => ({ key: p.key, vector: p.vector, text: p.text })) : [],
       my_picks: myPicks,
-      questions_for_me: theirPicks.map((key) => ({ key, text: text(key) })),
+      questions_for_me: theirPicks.map(({ key, text }) => ({ key, text })),
       my_answers: answers.rows
         .filter((a) => a.answerer_id === userId)
-        .map((a) => ({ prompt_key: a.prompt_key, text: text(a.prompt_key), audio_url: audioUrl(x.id, userId, a.prompt_key) })),
+        .map((a) => ({ prompt_key: a.prompt_key, text: answerText(userId, a.prompt_key), audio_url: audioUrl(x.id, userId, a.prompt_key) })),
       their_answers:
         x.status === 'released'
           ? answers.rows
               .filter((a) => a.answerer_id === other)
-              .map((a) => ({ prompt_key: a.prompt_key, text: text(a.prompt_key), audio_url: audioUrl(x.id, other, a.prompt_key) }))
+              .map((a) => ({ prompt_key: a.prompt_key, text: answerText(other, a.prompt_key), audio_url: audioUrl(x.id, other, a.prompt_key) }))
           : [],
     };
   });
 }
 
-/** Wednesday: choose the 2–3 questions the other person will answer. Changeable until Thu 00:00. */
-export async function pickPrompts(ctx: AppContext, userId: string, exchangeId: string, keys: string[]): Promise<ExchangeDetail> {
-  const unique = [...new Set(keys)];
-  if (unique.length < MIN_PROMPTS_PER_PICK || unique.length > MAX_PROMPTS_PER_PICK) {
-    throw badRequest('invalid_picks', `Pick ${MIN_PROMPTS_PER_PICK} or ${MAX_PROMPTS_PER_PICK} questions`);
+/** A question for the other person: a bank key, or one written by the member. */
+export type QuestionChoice = string | { text: string };
+
+/**
+ * Wednesday: choose the two questions the other person will answer, from the bank or written
+ * yourself. Changeable until Thu 00:00.
+ */
+export async function pickPrompts(ctx: AppContext, userId: string, exchangeId: string, choices: QuestionChoice[]): Promise<ExchangeDetail> {
+  const rows = choices.map((c, i) =>
+    typeof c === 'string' ? { key: c, custom: null as string | null } : { key: `custom_${i + 1}`, custom: c.text.trim().replace(/\s+/g, ' ') },
+  );
+  const keys = rows.map((r) => r.key);
+  if (rows.length < MIN_PROMPTS_PER_PICK || rows.length > MAX_PROMPTS_PER_PICK || new Set(keys).size !== keys.length) {
+    throw badRequest('invalid_picks', `Choose ${MAX_PROMPTS_PER_PICK} different questions`);
   }
-  if (!unique.every((k) => VOICE_PROMPT_BY_KEY.has(k))) throw badRequest('invalid_picks', 'Unknown question');
+  for (const r of rows) {
+    if (r.custom === null ? !VOICE_PROMPT_BY_KEY.has(r.key) : r.custom.length < CUSTOM_QUESTION_MIN || r.custom.length > CUSTOM_QUESTION_MAX) {
+      throw badRequest('invalid_picks', r.custom === null ? 'Unknown question' : `Write your question in ${CUSTOM_QUESTION_MIN}–${CUSTOM_QUESTION_MAX} characters`);
+    }
+  }
+  if (new Set(rows.filter((r) => r.custom).map((r) => r.custom!.toLowerCase())).size !== rows.filter((r) => r.custom).length) {
+    throw badRequest('invalid_picks', `Choose ${MAX_PROMPTS_PER_PICK} different questions`);
+  }
   const now = ctx.now();
   await withSystemTx(ctx.db, async (tx) => {
     const x = await loadForParty(tx, exchangeId, userId, true);
@@ -188,9 +221,9 @@ export async function pickPrompts(ctx: AppContext, userId: string, exchangeId: s
     }
     await tx.query('DELETE FROM voice_prompt_picks WHERE exchange_id = $1 AND picker_id = $2', [x.id, userId]);
     await tx.query(
-      `INSERT INTO voice_prompt_picks (exchange_id, picker_id, position, prompt_key)
-       SELECT $1, $2, ord, key FROM unnest($3::text[]) WITH ORDINALITY AS t (key, ord)`,
-      [x.id, userId, unique],
+      `INSERT INTO voice_prompt_picks (exchange_id, picker_id, position, prompt_key, custom_text)
+       SELECT $1, $2, ord, key, custom FROM unnest($3::text[], $4::text[]) WITH ORDINALITY AS t (key, custom, ord)`,
+      [x.id, userId, keys, rows.map((r) => r.custom)],
     );
   });
   return getExchange(ctx, userId, exchangeId);
@@ -233,7 +266,7 @@ export async function lockAnswers(
       }
       if (lockedAt(x, userId)) throw conflict('already_locked', 'Your answers are already locked');
 
-      const required = await picksBy(tx, x.id, counterpartOf(x, userId));
+      const required = (await picksBy(tx, x.id, counterpartOf(x, userId))).map((q) => q.key);
       const byKey = new Map(files.map((f) => [f.promptKey, f.data]));
       if (required.some((k) => !byKey.has(k)) || byKey.size !== required.length) {
         throw badRequest('answers_incomplete', 'Record one answer for each of their questions before locking');

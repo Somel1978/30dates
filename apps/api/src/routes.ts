@@ -1,4 +1,4 @@
-import { BRIDGE_MODES, MAX_ANSWER_BYTES, MAX_PROMPTS_PER_PICK } from '@thirtydates/shared';
+import { BRIDGE_MODES, CUSTOM_QUESTION_MAX, MAX_ANSWER_BYTES, MAX_PROMPTS_PER_PICK } from '@thirtydates/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { parse } from './app.js';
@@ -129,11 +129,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.put('/exchanges/:id/questions', member, async (req) => {
     const { id } = parse(idParams, req.params);
-    const { prompt_keys } = parse(
-      z.object({ prompt_keys: z.array(z.string().max(48)).min(1).max(MAX_PROMPTS_PER_PICK) }),
+    // Each question is a bank key or one the member wrote: [{ key }, { text }].
+    const { questions } = parse(
+      z.object({
+        questions: z
+          .array(z.union([z.object({ key: z.string().max(48) }), z.object({ text: z.string().max(CUSTOM_QUESTION_MAX + 50) })]))
+          .min(1)
+          .max(MAX_PROMPTS_PER_PICK),
+      }),
       req.body,
     );
-    return pickPrompts(ctx, req.auth.userId, id, prompt_keys);
+    return pickPrompts(ctx, req.auth.userId, id, questions.map((q) => ('key' in q ? q.key : { text: q.text })));
   });
 
   // Lock: one audio file per question, form field name = prompt key. Final.

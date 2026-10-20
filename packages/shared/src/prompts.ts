@@ -121,8 +121,11 @@ export const VOICE_PROMPTS: readonly VoicePrompt[] = [
 
 export const VOICE_PROMPT_BY_KEY: ReadonlyMap<string, VoicePrompt> = new Map(VOICE_PROMPTS.map((p) => [p.key, p]));
 
+/** Each person sends exactly two questions: from the bank, or written themselves. */
 export const MIN_PROMPTS_PER_PICK = 2;
-export const MAX_PROMPTS_PER_PICK = 3;
+export const MAX_PROMPTS_PER_PICK = 2;
+export const CUSTOM_QUESTION_MIN = 10;
+export const CUSTOM_QUESTION_MAX = 200;
 /** Longest single voice answer, enforced by the recorder; the server caps file size. */
 export const MAX_ANSWER_SECONDS = 90;
 export const MAX_ANSWER_BYTES = 4 * 1024 * 1024;

@@ -111,8 +111,8 @@ export interface ExchangeDetail extends ExchangeSummary {
   server_now: string;
   /** The bank to pick from (while picking questions). */
   prompt_bank: { key: string; vector: PromptVector; text: string }[];
-  /** Questions I chose for them. */
-  my_picks: string[];
+  /** Questions I chose for them (custom ones have a `custom_` key). */
+  my_picks: { key: string; text: string; custom: boolean }[];
   /** Questions they chose for me; visible once the Response Clock starts. */
   questions_for_me: { key: string; text: string }[];
   /** Their answers, playable only after release. */
